@@ -18,7 +18,7 @@ The archive format starts with the magic `"TMZL"`, followed by the uncompressed 
 To compile the project, use a command similar to the following. Adjust the source file names as necessary if your project is split into multiple files (e.g., `compressor.cpp`, `decompressor.cpp`, `searcher.cpp`, and `main.cpp`):
 
 ```bash
-g++ -std=c++17 -O2 -lz main.cpp -o logpress
+g++ -std=c++17 -o logpress main.cpp compressor.cpp decompressor.cpp searcher.cpp -lz
 ```
 Make sure that the include paths for zlib and the standard library are set correctly if they’re not in your default locations.
 
@@ -37,10 +37,10 @@ To compress one or more log files into an archive:
 Example:
 
 ```bash
-./logpress compress archive.tmzl log1.txt log2.txt
+./logpress compress compressed_archive.mylp fileA.log  
 ```
 
-This command reads `log1.txt` and `log2.txt`, compresses them using the template-based approach combined with zlib, and creates an archive file named `archive.tmzl`.
+This command reads `fileA.log`, compresses them using the template-based approach combined with zlib, and creates an archive file named `compressed_archive.mylp`.
 
 ### Decompressing an Archive
 
@@ -53,10 +53,10 @@ To decompress an archive and reconstruct the original log files into an output f
 Example:
 
 ```bash
-./logpress decompress archive.tmzl output_logs
+./logpress decompress compressed_archive.mylp Decomp
 ```
 
-This command extracts the compressed data from `archive.tmzl` and writes the reconstructed log files to the directory `output_logs`.
+This command extracts the compressed data from `compressed_archive.mylp` and writes the reconstructed log files to the directory `Decomp`.
 
 ### Searching Within an Archive
 
@@ -69,7 +69,7 @@ To search for a specific term in the archive without decompressing all files:
 Example:
 
 ```bash
-./logpress search archive.tmzl "ERROR"
+./logpress search compressed_archive.mylp Verification  
 ```
 
-This command searches the archive for any log lines containing the term "ERROR" and prints out the matching lines along with the corresponding filename.
+This command searches the archive for any log lines containing the term "Verification" and prints out the matching lines along with the corresponding filename.
