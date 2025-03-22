@@ -4,40 +4,56 @@
 #include <fstream>
 #include <filesystem>
 #include <vector>
+#include <string>
 #include <cstring>
-#include <zlib.h>
 #include <cstdint>
+#include <zlib.h>
 
-// We'll read "TMZL" -> read uncompressed_size, compressed_size, read the zlib data
-// => inflate => get "TMPL" data => parse => write files
-
-static bool zlib_decompress_buffer(const std::vector<char>& in_data,
-                                   size_t uncompressed_size,
-                                   std::vector<char>& out_data)
-{
-    // We'll assume we know the exact uncompressed_size from the archive
-    out_data.resize(uncompressed_size);
-
-    uLongf dest_len = (uLongf)uncompressed_size;
-    int ret = ::uncompress(
-        reinterpret_cast<Bytef*>(out_data.data()),
-        &dest_len,
-        reinterpret_cast<const Bytef*>(in_data.data()),
-        (uLong)in_data.size()
-    );
+// New helper: decompress a buffer using zlib with a custom dictionary.
+static bool zlib_decompress_buffer_with_dict(const std::vector<char>& in_data,
+                                             size_t uncompressed_size,
+                                             std::vector<char>& out_data,
+                                             const std::string& dict) {
+    z_stream strm;
+    std::memset(&strm, 0, sizeof(strm));
+    int ret = inflateInit2(&strm, 15);
     if (ret != Z_OK) {
-        std::cerr << "zlib uncompress failed with code=" << ret << "\n";
+        std::cerr << "inflateInit2 failed with code=" << ret << "\n";
         return false;
     }
-    // sanity
-    if (dest_len != uncompressed_size) {
-        std::cerr << "zlib uncompress mismatch size.\n";
+    
+    strm.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(in_data.data()));
+    strm.avail_in = in_data.size();
+    
+    out_data.resize(uncompressed_size);
+    strm.next_out = reinterpret_cast<Bytef*>(out_data.data());
+    strm.avail_out = uncompressed_size;
+    
+    ret = inflate(&strm, Z_FINISH);
+    if (ret == Z_NEED_DICT) {
+        ret = inflateSetDictionary(&strm, reinterpret_cast<const Bytef*>(dict.data()), dict.size());
+        if (ret != Z_OK) {
+            std::cerr << "inflateSetDictionary failed with code=" << ret << "\n";
+            inflateEnd(&strm);
+            return false;
+        }
+        ret = inflate(&strm, Z_FINISH);
+    }
+    if (ret != Z_STREAM_END) {
+        std::cerr << "inflate failed with code=" << ret << "\n";
+        inflateEnd(&strm);
         return false;
     }
+    if (strm.total_out != uncompressed_size) {
+        std::cerr << "Uncompressed size mismatch with dictionary.\n";
+        inflateEnd(&strm);
+        return false;
+    }
+    inflateEnd(&strm);
     return true;
 }
 
-// reads a 32-bit LE integer from a buffer
+// Helper: read a uint32_t from a buffer.
 static uint32_t read_u32(const char* &p) {
     uint32_t val;
     std::memcpy(&val, p, 4);
@@ -46,141 +62,155 @@ static uint32_t read_u32(const char* &p) {
 }
 
 bool decompress_files_template_zlib(const std::string& archive_path,
-                                    const std::string& output_folder)
-{
+                                    const std::string& output_folder) {
     std::ifstream in(archive_path, std::ios::binary);
     if (!in.is_open()) {
-        std::cerr << "Cannot open " << archive_path << "\n";
+        std::cerr << "Cannot open archive: " << archive_path << "\n";
         return false;
     }
-
-    char Z_magic[4];
-    in.read(Z_magic, 4);
-    if (in.gcount() < 4 || Z_magic[0] != 'T' || Z_magic[1] != 'M' ||
-        Z_magic[2] != 'Z' || Z_magic[3] != 'L')
-    {
+    
+    // Read file magic "TMZL".
+    char file_magic[4];
+    in.read(file_magic, 4);
+    if (in.gcount() < 4 || std::strncmp(file_magic, "TMZL", 4) != 0) {
         std::cerr << "Not a valid TMZL archive.\n";
         return false;
     }
-
-    uint32_t unc_size = 0, cmp_size = 0;
-    in.read(reinterpret_cast<char*>(&unc_size), 4);
-    in.read(reinterpret_cast<char*>(&cmp_size), 4);
-    if (!in.good()) {
-        std::cerr << "Error reading uncompressed/compressed size.\n";
+    
+    // Read global header magic "TMPL".
+    char global_magic[4];
+    in.read(global_magic, 4);
+    if (in.gcount() < 4 || std::strncmp(global_magic, "TMPL", 4) != 0) {
+        std::cerr << "Missing TMPL global header.\n";
         return false;
     }
-
-    // read compressed data
-    std::vector<char> cmp_data(cmp_size);
-    in.read(cmp_data.data(), cmp_size);
-    if ((uint32_t)in.gcount() < cmp_size) {
-        std::cerr << "Not enough data in archive.\n";
-        return false;
-    }
-    in.close();
-
-    // inflate
-    std::vector<char> full_data;
-    if (!zlib_decompress_buffer(cmp_data, unc_size, full_data)) {
-        return false;
-    }
-
-    // parse "TMPL"
-    const char *p = full_data.data();
-    if (p[0] != 'T' || p[1] != 'M' || p[2] != 'P' || p[3] != 'L') {
-        std::cerr << "Missing TMPL magic inside inflated data.\n";
-        return false;
-    }
-    p += 4;
-
-    // read template_count, line_count
-    uint32_t template_count = read_u32(p);
-    uint32_t line_count     = read_u32(p);
-
-    // read templates
+    
+    // Read counts.
+    uint32_t template_count = 0;
+    uint32_t filename_count = 0;
+    uint32_t variable_count = 0;
+    uint32_t block_count = 0;
+    
+    in.read(reinterpret_cast<char*>(&template_count), 4);
+    in.read(reinterpret_cast<char*>(&filename_count), 4);
+    in.read(reinterpret_cast<char*>(&variable_count), 4);
+    in.read(reinterpret_cast<char*>(&block_count), 4);
+    
+    // Read templates.
     std::vector<std::string> templates(template_count);
     for (uint32_t i = 0; i < template_count; i++) {
-        uint32_t len = read_u32(p);
-        templates[i].assign(p, p + len);
-        p += len;
+        uint32_t len = 0;
+        in.read(reinterpret_cast<char*>(&len), 4);
+        std::string tpl(len, '\0');
+        in.read(&tpl[0], len);
+        templates[i] = tpl;
     }
-
-    // read lines
-    struct Line {
-        uint32_t file_id;
-        uint32_t template_id;
-        std::vector<std::string> vars;
-    };
-    std::vector<Line> lines(line_count);
-    for (uint32_t i = 0; i < line_count; i++) {
-        lines[i].file_id     = read_u32(p);
-        lines[i].template_id = read_u32(p);
-        uint32_t var_count   = read_u32(p);
-        lines[i].vars.resize(var_count);
-        for (uint32_t v = 0; v < var_count; v++) {
-            uint32_t vlen = read_u32(p);
-            lines[i].vars[v].assign(p, p + vlen);
-            p += vlen;
-        }
+    
+    // Read filenames.
+    std::vector<std::string> filenames(filename_count);
+    for (uint32_t i = 0; i < filename_count; i++) {
+        uint32_t len = 0;
+        in.read(reinterpret_cast<char*>(&len), 4);
+        std::string fn(len, '\0');
+        in.read(&fn[0], len);
+        filenames[i] = fn;
     }
-
-    // read filenames
-    uint32_t file_count = read_u32(p);
-    std::vector<std::string> filenames(file_count);
-    for (uint32_t f = 0; f < file_count; f++) {
-        uint32_t flen = read_u32(p);
-        filenames[f].assign(p, p + flen);
-        p += flen;
+    
+    // Read variable dictionary.
+    std::vector<std::string> variable_dict(variable_count);
+    for (uint32_t i = 0; i < variable_count; i++) {
+        uint32_t len = 0;
+        in.read(reinterpret_cast<char*>(&len), 4);
+        std::string var(len, '\0');
+        in.read(&var[0], len);
+        variable_dict[i] = var;
     }
-
-    // reconstruct lines
-    std::filesystem::create_directories(output_folder);
-    std::vector<std::ofstream> outs(file_count);
-    for (uint32_t f = 0; f < file_count; f++) {
-        auto out_path = std::filesystem::path(output_folder) /
-                        std::filesystem::path(filenames[f]).filename();
-        outs[f].open(out_path.string());
-        if (!outs[f].is_open()) {
-            std::cerr << "Cannot create " << out_path.string() << "\n";
+    
+    // Build the same dictionary used during compression.
+    std::string compression_dict;
+    for (const auto& tpl : templates) { compression_dict += tpl; }
+    for (const auto& fn : filenames) { compression_dict += fn; }
+    for (const auto& var : variable_dict) { compression_dict += var; }
+    
+    // Prepare output files.
+    std::vector<std::ofstream> outs(filename_count);
+    for (uint32_t i = 0; i < filename_count; i++) {
+        std::filesystem::create_directories(output_folder);
+        auto out_path = std::filesystem::path(output_folder) / std::filesystem::path(filenames[i]).filename();
+        outs[i].open(out_path.string());
+        if (!outs[i].is_open()) {
+            std::cerr << "Cannot create output file: " << out_path.string() << "\n";
             return false;
         }
     }
-
-    // For each line, reconstruct by substituting <VAR> placeholders
-    for (auto &ln : lines) {
-        if (ln.template_id >= template_count) {
-            std::cerr << "Bad template_id.\n";
+    
+    // Process each block.
+    for (uint32_t b = 0; b < block_count; b++) {
+        uint32_t lines_in_block = 0;
+        uint32_t block_uncompressed_size = 0;
+        uint32_t block_compressed_size = 0;
+        in.read(reinterpret_cast<char*>(&lines_in_block), 4);
+        in.read(reinterpret_cast<char*>(&block_uncompressed_size), 4);
+        in.read(reinterpret_cast<char*>(&block_compressed_size), 4);
+        
+        std::vector<char> block_compressed(block_compressed_size);
+        in.read(block_compressed.data(), block_compressed_size);
+        if (in.gcount() < block_compressed_size) {
+            std::cerr << "Not enough data in block.\n";
             return false;
         }
-        if (ln.file_id >= file_count) {
-            std::cerr << "Bad file_id.\n";
+        
+        std::vector<char> block_uncompressed;
+        if (!zlib_decompress_buffer_with_dict(block_compressed, block_uncompressed_size, block_uncompressed, compression_dict)) {
+            std::cerr << "Block decompression with dictionary failed.\n";
             return false;
         }
-        std::string const& tpl = templates[ln.template_id];
-        std::string reconstructed;
-        reconstructed.reserve(tpl.size() + 10*ln.vars.size());
-        size_t start = 0, var_i = 0;
-        while (true) {
-            size_t pos = tpl.find("<VAR>", start);
-            if (pos == std::string::npos) {
-                reconstructed.append(tpl, start, tpl.size() - start);
-                break;
+        
+        const char* p = block_uncompressed.data();
+        for (uint32_t i = 0; i < lines_in_block; i++) {
+            uint32_t file_id = read_u32(p);
+            uint32_t tpl_id = read_u32(p);
+            uint32_t var_count_line = read_u32(p);
+            std::vector<uint32_t> var_ids(var_count_line);
+            for (uint32_t j = 0; j < var_count_line; j++) {
+                var_ids[j] = read_u32(p);
             }
-            reconstructed.append(tpl, start, pos - start);
-            if (var_i < ln.vars.size()) {
-                reconstructed += ln.vars[var_i++];
-            } else {
-                reconstructed += "???";
+            // Reconstruct the log line.
+            if (tpl_id >= templates.size()) {
+                std::cerr << "Invalid template ID.\n";
+                return false;
             }
-            start = pos + 5;
+            const std::string& tpl = templates[tpl_id];
+            std::string reconstructed;
+            reconstructed.reserve(tpl.size() + 20 * var_ids.size());
+            size_t start = 0;
+            size_t var_index = 0;
+            while (true) {
+                size_t pos = tpl.find("<VAR>", start);
+                if (pos == std::string::npos) {
+                    reconstructed.append(tpl, start, tpl.size() - start);
+                    break;
+                }
+                reconstructed.append(tpl, start, pos - start);
+                if (var_index < var_ids.size() && var_ids[var_index] < variable_dict.size()) {
+                    reconstructed += variable_dict[var_ids[var_index]];
+                    var_index++;
+                } else {
+                    reconstructed += "???";
+                }
+                start = pos + 5;
+            }
+            // Write the reconstructed line to the corresponding file.
+            if (file_id < outs.size()) {
+                outs[file_id] << reconstructed << "\n";
+            }
         }
-        outs[ln.file_id] << reconstructed << "\n";
     }
-
-    for (auto &ofs : outs) {
+    
+    for (auto& ofs : outs) {
         ofs.close();
     }
-
+    
+    std::cout << "Decompression completed. Files are written to " << output_folder << "\n";
     return true;
 }

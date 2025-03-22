@@ -1,0 +1,6 @@
+./archives/*
+./build/*
+./dist/*
+./.DS_Store
+./dataset/*
+./input/*

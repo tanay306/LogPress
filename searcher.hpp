@@ -1,13 +1,11 @@
-#ifndef TEMPLATE_SEARCHER_HPP
-#define TEMPLATE_SEARCHER_HPP
+#ifndef SEARCHER_HPP
+#define SEARCHER_HPP
 
 #include <string>
 
-/**
- * Search a "TMZL" + "TMPL" archive for lines containing `search_term`.
- * Prints "filename: line" for each match.
- */
+// Search the archive for a given term (supports wildcards '*' and '?').
+// The search is performed block by block to avoid decompressing the entire archive.
 bool search_archive_template_zlib(const std::string& archive_path,
                                   const std::string& search_term);
 
-#endif // TEMPLATE_SEARCHER_HPP
+#endif // SEARCHER_HPP
