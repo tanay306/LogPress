@@ -24,7 +24,7 @@ struct ParseResult {
     std::vector<std::string> vars;
 };
 
-static std::regex g_num_regex(R"(\d+)");
+static std::regex g_num_regex(R"((?:\d+[.:_-]?)+)");
 
 // Replace numeric tokens with <VAR> and extract the raw tokens.
 static ParseResult make_template(const std::string& line) {
@@ -181,11 +181,12 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
             // Update progress.
             std::streampos pos = in_file.tellg();
             if (pos > 0) {
-                bytes_read_so_far += static_cast<uint64_t>(pos);
+                // Instead of adding pos, we assign it directly:
+                bytes_read_so_far = static_cast<uint64_t>(pos);
                 double ratio = static_cast<double>(bytes_read_so_far) / total_input_size;
                 auto now = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double> elapsed = now - last_update_time;
-                double speed = (elapsed.count() > 0) ? (bytes_read_so_far / elapsed.count() / (1024 * 1024)) : 0;
+                double speed = (elapsed.count() > 0) ? (bytes_read_so_far / elapsed.count() / (1024 * 1024)) : 0; // MB/s
                 if (ratio >= next_progress_threshold) {
                     print_progress(ratio, speed);
                     next_progress_threshold += 0.01;
