@@ -1,317 +1,190 @@
 #include "compressor.hpp"
+#include "sqlite_helper.hpp"
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <filesystem>
-#include <unordered_map>
 #include <regex>
-#include <vector>
-#include <string>
-#include <chrono>
-#include <cstring>
+#include <unordered_map>
 #include <zlib.h>
+#include <cstring>
 
-// Structure for an in-memory log entry (now storing variable IDs)
-struct Entry {
-    uint32_t file_id;
-    uint32_t template_id;
-    std::vector<uint32_t> var_ids;
-};
+// Utility to write uint32_t
+void write_u32(std::vector<char>& buf, uint32_t v) {
+    char tmp[4];
+    std::memcpy(tmp, &v, 4);
+    buf.insert(buf.end(), tmp, tmp + 4);
+}
 
-// Structure for parsing a line: templated text and raw variable strings.
-struct ParseResult {
-    std::string tpl;
-    std::vector<std::string> vars;
-};
+// Classification logic
+VarType classify_var(const std::string& v) {
+    // IPv4: each octet must be 0-255
+    static std::regex ip(
+        R"(^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$)"
+    );
+    static std::regex ts_pattern_1(
+        R"(^(0[0-9]|1[0-9]|2[0-3])[:\-]?([0-5][0-9])[:\-]?([0-5][0-9])$)"
+    );
+    static std::regex ts_pattern_2(
+        R"(^((19|20)\d\d)[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])$)"
+    );
+    static std::regex ts_pattern_3(
+        R"(^\d{8,14}$)"
+    );
 
-static std::regex g_num_regex(R"((?:\d+[.:_-]?)+)");
+    if (std::regex_match(v, ip)) return VarType::IP;
+    if (std::regex_match(v, ts_pattern_1) ||
+        std::regex_match(v, ts_pattern_2) ||
+        std::regex_match(v, ts_pattern_3)) return VarType::TS;
 
-// Replace numeric tokens with <VAR> and extract the raw tokens.
-static ParseResult make_template(const std::string& line) {
+    return VarType::NUM;
+}
+
+static std::regex g_var_regex(R"([+\-]?\d+(?:[._:\-]\d+)*)");
+
+ParseResult make_typed_template(const std::string& line) {
     ParseResult r;
-    r.tpl.reserve(line.size());
-    std::size_t startPos = 0;
-    for (std::sregex_iterator it(line.begin(), line.end(), g_num_regex), end; it != end; ++it) {
+    size_t last = 0;
+    for (std::sregex_iterator it(line.begin(), line.end(), g_var_regex), end; it != end; ++it) {
         auto m = *it;
-        auto matchStart = static_cast<std::size_t>(m.position());
-        auto matchLen   = m.length();
-        if (matchStart > startPos) {
-            r.tpl.append(line, startPos, matchStart - startPos);
-        }
+        r.tpl.append(line, last, m.position() - last);
         r.tpl += "<VAR>";
         r.vars.push_back(m.str());
-        startPos = matchStart + matchLen;
+        r.types.push_back(classify_var(m.str()));
+        last = m.position() + m.length();
     }
-    if (startPos < line.size()) {
-        r.tpl.append(line, startPos, line.size() - startPos);
-    }
+    r.tpl.append(line, last);
     return r;
 }
 
-// Helper to write a uint32_t to a buffer.
-static void write_u32(std::vector<char>& buf, uint32_t val) {
-    char data[4];
-    std::memcpy(data, &val, 4);
-    buf.insert(buf.end(), data, data+4);
-}
-
-// New helper: compress a buffer using zlib with a custom dictionary.
-static bool zlib_compress_buffer_with_dict(const std::vector<char>& in_data,
-                                           std::vector<char>& out_data,
-                                           const std::string& dict) {
-    z_stream strm;
-    std::memset(&strm, 0, sizeof(strm));
-    int ret = deflateInit2(&strm, Z_BEST_COMPRESSION, Z_DEFLATED,
-                           15, 9, Z_DEFAULT_STRATEGY);
-    if (ret != Z_OK) {
-        std::cerr << "deflateInit2 failed with code=" << ret << "\n";
-        return false;
-    }
-    ret = deflateSetDictionary(&strm, reinterpret_cast<const Bytef*>(dict.data()), dict.size());
-    if (ret != Z_OK) {
-        std::cerr << "deflateSetDictionary failed with code=" << ret << "\n";
-        deflateEnd(&strm);
-        return false;
-    }
-    
-    uLongf bound = compressBound(in_data.size());
-    out_data.resize(bound);
-    
-    strm.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(in_data.data()));
-    strm.avail_in = in_data.size();
-    strm.next_out = reinterpret_cast<Bytef*>(out_data.data());
-    strm.avail_out = out_data.size();
-    
-    ret = deflate(&strm, Z_FINISH);
-    if (ret != Z_STREAM_END) {
-        std::cerr << "deflate failed with code=" << ret << "\n";
-        deflateEnd(&strm);
-        return false;
-    }
-    out_data.resize(strm.total_out);
+// Zlib compression
+bool zlib_compress_block(const std::vector<char>& in, std::vector<char>& out, const std::string& dict) {
+    z_stream strm{};
+    if (deflateInit2(&strm, Z_BEST_COMPRESSION, Z_DEFLATED, 15, 9, Z_DEFAULT_STRATEGY) != Z_OK) return false;
+    deflateSetDictionary(&strm, reinterpret_cast<const Bytef*>(dict.data()), dict.size());
+    out.resize(compressBound(in.size()));
+    strm.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(in.data()));
+    strm.avail_in = static_cast<uInt>(in.size());
+    strm.next_out = reinterpret_cast<Bytef*>(out.data());
+    strm.avail_out = static_cast<uInt>(out.size());
+    int ret = deflate(&strm, Z_FINISH);
+    if (ret != Z_STREAM_END) { deflateEnd(&strm); return false; }
+    out.resize(strm.total_out);
     deflateEnd(&strm);
     return true;
 }
 
-// Get a unique ID for a variable (deduplicates the raw variable strings).
-static uint32_t get_variable_id(const std::string& var,
-                                std::unordered_map<std::string, uint32_t>& var_map,
-                                std::vector<std::string>& var_list) {
-    auto it = var_map.find(var);
-    if (it != var_map.end()) {
-        return it->second;
-    } else {
-        uint32_t id = static_cast<uint32_t>(var_list.size());
-        var_list.push_back(var);
-        var_map[var] = id;
-        return id;
-    }
-}
-
-// Main compression function using block-based compression and dictionary-assisted compression.
 bool compress_files_template_zlib(const std::vector<std::string>& input_files,
                                   const std::string& archive_path,
                                   size_t lines_per_block) {
-    auto start_time = std::chrono::high_resolution_clock::now();
-    
-    // Determine total input size (for progress reporting)
-    uint64_t total_input_size = 0;
-    for (const auto& f : input_files) {
-        std::error_code ec;
-        auto sz = std::filesystem::file_size(f, ec);
-        if (!ec) {
-            total_input_size += sz;
-        }
-    }
-    
-    // Containers for deduplication and storage.
-    std::vector<std::string> templates;
-    std::unordered_map<std::string, uint32_t> template_map;
-    std::vector<std::string> filenames;
-    std::vector<Entry> entries;
-    std::unordered_map<std::string, uint32_t> variable_map;
-    std::vector<std::string> variable_list;
-    
-    uint64_t total_lines = 0;
-    uint64_t uncompressed_text_size = 0;
-    uint64_t bytes_read_so_far = 0;
-    
-    auto print_progress = [&](double ratio, double speed) {
-        int pct = static_cast<int>(ratio * 100.0);
-        std::cerr << "\rCompressing... " << pct << "% | Speed: " << speed << " MB/s";
-        std::cerr.flush();
-    };
-    double next_progress_threshold = 0.0;
-    auto last_update_time = std::chrono::high_resolution_clock::now();
-    
-    // Process each input file.
-    for (uint32_t f_id = 0; f_id < input_files.size(); f_id++) {
-        filenames.push_back(input_files[f_id]);
-        std::ifstream in_file(input_files[f_id]);
-        if (!in_file.is_open()) {
-            std::cerr << "\nCannot open " << input_files[f_id] << "\n";
-            return false;
-        }
+    std::unordered_map<std::string, uint32_t> tpl_map, var_map, file_map;
+    std::vector<std::string> templates, variables, files;
+    std::vector<VarType> var_types;
+    std::vector<char> current_block;
+    std::vector<std::vector<char>> blocks;
+    size_t total_lines = 0;
+
+    for (const auto& file : input_files) {
+        std::ifstream in(file);
+        if (!in) { std::cerr << "File open failed: " << file << "\n"; return false; }
+
+        uint32_t file_id = file_map.emplace(file, files.size()).first->second;
+        if (file_id == files.size()) files.push_back(file);
+
         std::string line;
-        while (std::getline(in_file, line)) {
-            total_lines++;
-            uncompressed_text_size += (line.size() + 1);
-            
-            ParseResult parse = make_template(line);
-            uint32_t tpl_id;
-            auto it_tpl = template_map.find(parse.tpl);
-            if (it_tpl == template_map.end()) {
-                tpl_id = static_cast<uint32_t>(templates.size());
-                templates.push_back(parse.tpl);
-                template_map[parse.tpl] = tpl_id;
-            } else {
-                tpl_id = it_tpl->second;
-            }
-            
-            // Deduplicate variables.
-            Entry e;
-            e.file_id = f_id;
-            e.template_id = tpl_id;
-            for (const auto& var : parse.vars) {
-                uint32_t var_id = get_variable_id(var, variable_map, variable_list);
-                e.var_ids.push_back(var_id);
-            }
-            entries.push_back(std::move(e));
-            
-            // Update progress.
-            std::streampos pos = in_file.tellg();
-            if (pos > 0) {
-                // Instead of adding pos, we assign it directly:
-                bytes_read_so_far = static_cast<uint64_t>(pos);
-                double ratio = static_cast<double>(bytes_read_so_far) / total_input_size;
-                auto now = std::chrono::high_resolution_clock::now();
-                std::chrono::duration<double> elapsed = now - last_update_time;
-                double speed = (elapsed.count() > 0) ? (bytes_read_so_far / elapsed.count() / (1024 * 1024)) : 0; // MB/s
-                if (ratio >= next_progress_threshold) {
-                    print_progress(ratio, speed);
-                    next_progress_threshold += 0.01;
+        while (std::getline(in, line)) {
+            ParseResult pr = make_typed_template(line);
+
+            if (pr.tpl.empty()) continue;
+
+            uint32_t tpl_id = tpl_map.emplace(pr.tpl, templates.size()).first->second;
+            if (tpl_id == templates.size()) templates.push_back(pr.tpl);
+
+            write_u32(current_block, file_id);
+            write_u32(current_block, tpl_id);
+            write_u32(current_block, pr.vars.size());
+
+            for (size_t i = 0; i < pr.vars.size(); ++i) {
+                const std::string& v = pr.vars[i];
+                uint32_t var_id = var_map.emplace(v, variables.size()).first->second;
+                if (var_id == variables.size()) {
+                    variables.push_back(v);
+                    var_types.push_back(pr.types[i]);
                 }
+                write_u32(current_block, var_id);
+            }
+
+            total_lines++;
+            if (total_lines % lines_per_block == 0) {
+                blocks.push_back(std::move(current_block));
+                current_block.clear();
             }
         }
-        in_file.close();
     }
-    std::cerr << "\n";
-    
-    // Increase block size if needed (bigger blocks usually yield better compression).
-    size_t total_entries = entries.size();
-    uint32_t block_count = static_cast<uint32_t>((total_entries + lines_per_block - 1) / lines_per_block);
-    
-    // Build the global header data.
-    std::vector<char> global_data;
-    // Write global header magic "TMPL".
-    global_data.insert(global_data.end(), {'T','M','P','L'});
-    // Write counts: templates, filenames, variables, and block count.
-    write_u32(global_data, static_cast<uint32_t>(templates.size()));
-    write_u32(global_data, static_cast<uint32_t>(filenames.size()));
-    write_u32(global_data, static_cast<uint32_t>(variable_list.size()));
-    write_u32(global_data, block_count);
-    
-    // Write templates section.
-    for (const auto& tpl : templates) {
-        write_u32(global_data, static_cast<uint32_t>(tpl.size()));
-        global_data.insert(global_data.end(), tpl.begin(), tpl.end());
+
+    if (!current_block.empty()){
+        blocks.push_back(std::move(current_block));
     }
-    // Write filenames section.
-    for (const auto& fn : filenames) {
-        write_u32(global_data, static_cast<uint32_t>(fn.size()));
-        global_data.insert(global_data.end(), fn.begin(), fn.end());
-    }
-    // Write variable dictionary section.
-    for (const auto& var : variable_list) {
-        write_u32(global_data, static_cast<uint32_t>(var.size()));
-        global_data.insert(global_data.end(), var.begin(), var.end());
-    }
-    
-    // Build a custom compression dictionary from the text fields.
-    std::string compression_dict;
-    for (const auto& tpl : templates) { compression_dict += tpl; }
-    for (const auto& fn : filenames) { compression_dict += fn; }
-    for (const auto& var : variable_list) { compression_dict += var; }
-    
-    // Process and compress each block.
-    std::vector<char> blocks_data;
-    size_t total_uncompressed_lines_size = 0;
-    size_t total_compressed_lines_size = 0;
-    size_t entry_index = 0;
-    
-    for (uint32_t b = 0; b < block_count; b++) {
-        std::vector<char> block_uncompressed;
-        uint32_t lines_in_block = 0;
-        while (entry_index < total_entries && lines_in_block < lines_per_block) {
-            const Entry& e = entries[entry_index++];
-            lines_in_block++;
-            write_u32(block_uncompressed, e.file_id);
-            write_u32(block_uncompressed, e.template_id);
-            write_u32(block_uncompressed, static_cast<uint32_t>(e.var_ids.size()));
-            for (uint32_t var_id : e.var_ids) {
-                write_u32(block_uncompressed, var_id);
-            }
-        }
-        uint32_t block_uncompressed_size = static_cast<uint32_t>(block_uncompressed.size());
-        total_uncompressed_lines_size += block_uncompressed_size;
-        
-        // Compress the block with our dictionary.
-        std::vector<char> block_compressed;
-        if (!zlib_compress_buffer_with_dict(block_uncompressed, block_compressed, compression_dict)) {
-            std::cerr << "Block compression with dictionary failed.\n";
-            return false;
-        }
-        uint32_t block_compressed_size = static_cast<uint32_t>(block_compressed.size());
-        total_compressed_lines_size += block_compressed_size;
-        
-        // Write block header: number of lines, uncompressed size, compressed size.
-        write_u32(blocks_data, lines_in_block);
-        write_u32(blocks_data, block_uncompressed_size);
-        write_u32(blocks_data, block_compressed_size);
-        // Append the compressed block data.
-        blocks_data.insert(blocks_data.end(), block_compressed.begin(), block_compressed.end());
-    }
-    
-    // Write the final archive file.
-    std::ofstream out(archive_path, std::ios::binary);
-    if (!out.is_open()) {
-        std::cerr << "Cannot create archive file: " << archive_path << "\n";
+
+
+    std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
+    std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
+
+    // SQLite metadata
+    sqlite3* db = nullptr;
+    if (!initialize_db(db, archive_path + ".meta.db")) {
+        std::cerr << "Failed to init SQLite.\n";
         return false;
     }
-    
-    // Write file magic "TMZL".
-    out.write("TMZL", 4);
-    // Write the global header.
-    out.write(global_data.data(), global_data.size());
-    // Write the blocks.
-    out.write(blocks_data.data(), blocks_data.size());
-    out.close();
-    
-    uint64_t final_size = std::filesystem::file_size(archive_path);
-    size_t total_global_uncompressed = 4 + global_data.size(); // file magic + header
-    size_t total_uncompressed = total_global_uncompressed + total_uncompressed_lines_size;
-    size_t total_compressed = total_global_uncompressed + total_compressed_lines_size;
-    double ratio = (final_size > 0) ? double(total_uncompressed) / double(final_size) : 0;
-    
-    auto end_time = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end_time - start_time;
-    double compression_speed = (elapsed.count() > 0) ? (total_uncompressed / elapsed.count() / (1024 * 1024)) : 0;
-    double percentage_reduction = (total_uncompressed > 0) ? ((1.0 - double(total_compressed) / total_uncompressed) * 100) : 0;
-    
-    std::cout << "\n--- Compression Metrics (Template + Dictionary-assisted Block Compression) ---\n";
-    std::cout << "Total lines read:          " << total_lines << "\n";
-    std::cout << "Unique templates:          " << templates.size() << "\n";
-    std::cout << "Unique variables:          " << variable_list.size() << "\n";
-    std::cout << "Uncompressed text size:    " << uncompressed_text_size << " bytes\n";
-    std::cout << "Global header size:        " << global_data.size() << " bytes\n";
-    std::cout << "Uncompressed lines size:   " << total_uncompressed_lines_size << " bytes\n";
-    std::cout << "Total uncompressed size:   " << total_uncompressed << " bytes\n";
-    std::cout << "Total compressed size:     " << final_size << " bytes\n";
-    std::cout << "Compression ratio:         " << ratio << "\n";
-    std::cout << "Compression time:          " << elapsed.count() << " seconds\n";
-    std::cout << "Compression speed:         " << compression_speed << " MB/s\n";
-    std::cout << "Size reduction:            " << percentage_reduction << "%\n";
-    std::cout << "--------------------------------------------------------------------------\n";
-    
+    store_templates_and_variables(db, templates, variables, var_types, files);
+    sqlite3_close(db);
+
+    // Build dictionary
+    std::string dict;
+    for (const auto& s : templates) dict += s;
+    for (const auto& v : variables) dict += v;
+    for (const auto& f : files) dict += f;
+
+    std::ofstream debug_dict("compression.dict");
+    debug_dict << dict;
+    debug_dict.close();
+
+    std::ofstream out(archive_path, std::ios::binary);
+    if (!out) return false;
+    out.write("TCDZ", 4);
+
+    for (auto& blk : blocks) {
+        std::vector<char> comp;
+        if (!zlib_compress_block(blk, comp, dict)) {
+            std::cerr << "Block compression failed.\n";
+            return false;
+        }
+
+        size_t lines = 0, i = 0;
+        while (i < blk.size()) {
+            lines++;
+            uint32_t var_offset = i + 8; // file_id (4) + tpl_id (4)
+            uint32_t var_count;
+            std::memcpy(&var_count, &blk[var_offset], 4);
+            i = var_offset + 4 + var_count * 4;
+        }
+
+        uint32_t lines_val = static_cast<uint32_t>(lines);
+        uint32_t blk_size = static_cast<uint32_t>(blk.size());
+        uint32_t comp_size = static_cast<uint32_t>(comp.size());
+        out.write(reinterpret_cast<const char*>(&lines_val), 4);
+        out.write(reinterpret_cast<const char*>(&blk_size), 4);
+        out.write(reinterpret_cast<const char*>(&comp_size), 4);
+        out.write(comp.data(), comp.size());
+    }
+    std::cout << "[DEBUG] Final: variables.size()=" << variables.size()
+          << ", var_types.size()=" << var_types.size() << "\n";
+
+    std::cout << "📦 Compressed " << total_lines << " lines in " << blocks.size() << " blocks.\n";
+    std::cout << "📊 Templates: " << templates.size()
+              << ", Variables: " << variables.size()
+              << ", Files: " << files.size() << "\n";
+    std::cout << "🧠 Dict Size: " << dict.size() << " bytes (saved to compression.dict)\n";
     return true;
 }

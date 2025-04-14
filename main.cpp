@@ -76,16 +76,21 @@ int main(int argc, char* argv[]) {
     }
     else if (command == "search") {
         if (argc < 4) {
-            std::cerr << "Not enough arguments for search.\n";
+            std::cerr << "Usage: search <archive> <search_term> [--type=IP|TS|NUM]\n";
             return 1;
         }
-        std::string archive_path = argv[2];
-        std::string search_term  = argv[3];
-        if (!search_archive_template_zlib(archive_path, search_term)) {
+        std::string archive = argv[2];
+        std::string term = argv[3];
+        std::string type_filter;
+        if (argc >= 5 && std::string(argv[4]).find("--type=") == 0) {
+            type_filter = std::string(argv[4]).substr(7);
+        }
+        if (!search_archive_template_zlib(archive, term, type_filter)) {
             std::cerr << "Search failed.\n";
             return 1;
         }
     }
+    
     else {
         std::cerr << "Unknown command: " << command << "\n";
         return 1;

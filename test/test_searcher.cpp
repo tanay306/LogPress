@@ -1,149 +1,156 @@
-#include "searcher.hpp"
-#include "sqlite_helper.hpp"
-
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <string>
 #include <regex>
-#include <cstring>
 #include <filesystem>
+#include <cstring>
 #include <zlib.h>
 
-// Utility to read 4 bytes as uint32_t from file
-static uint32_t read_u32(std::ifstream& in) {
+#include "sqlite_helper.hpp"
+#include "searcher.hpp"
+
+uint32_t read_u32(std::ifstream &in) {
     uint32_t v;
     in.read(reinterpret_cast<char*>(&v), 4);
     return v;
 }
 
-// Utility to read 4 bytes as uint32_t from memory buffer
-static uint32_t read_u32_mem(const char*& p) {
+uint32_t read_u32_mem(const char *&p) {
     uint32_t v;
     std::memcpy(&v, p, 4);
     p += 4;
     return v;
 }
 
-// Decompress a single block using zlib + dictionary
-static bool zlib_decompress_block(const std::vector<char>& in_data,
-                                  size_t uncompressed_size,
-                                  std::vector<char>& out_data,
-                                  const std::string& dict) {
+bool zlib_decompress_block(const std::vector<char> &in_data,
+                           size_t uncompressed_size,
+                           std::vector<char> &out_data,
+                           const std::string &dict) {
     z_stream strm{};
     if (inflateInit2(&strm, 15) != Z_OK) {
         return false;
     }
-
     out_data.resize(uncompressed_size);
-    strm.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(in_data.data()));
+    strm.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(in_data.data()));
     strm.avail_in = static_cast<uInt>(in_data.size());
-    strm.next_out = reinterpret_cast<Bytef*>(out_data.data());
+    strm.next_out = reinterpret_cast<Bytef *>(out_data.data());
     strm.avail_out = static_cast<uInt>(out_data.size());
 
     int ret = inflate(&strm, Z_FINISH);
     if (ret == Z_NEED_DICT && !dict.empty()) {
-        // If the block needs a dictionary, set it
-        if (inflateSetDictionary(&strm, reinterpret_cast<const Bytef*>(dict.data()), dict.size()) != Z_OK) {
+        if (inflateSetDictionary(&strm, reinterpret_cast<const Bytef *>(dict.data()), dict.size()) != Z_OK) {
             inflateEnd(&strm);
             return false;
         }
         ret = inflate(&strm, Z_FINISH);
     }
-
     bool ok = (ret == Z_STREAM_END && strm.total_out == uncompressed_size);
     inflateEnd(&strm);
     return ok;
 }
 
-// Map user-provided --type=IP/TS/NUM to VarType
-VarType parse_filter_type(const std::string& input) {
+VarType parse_filter_type(const std::string &input) {
     if (input == "IP")  return VarType::IP;
     if (input == "TS")  return VarType::TS;
     if (input == "NUM") return VarType::NUM;
-    return VarType::NUM; // fallback
+    return VarType::NUM;
 }
 
-bool search_archive_template_zlib(const std::string& archive_path,
-                                  const std::string& search_term,
-                                  const std::string& type_filter) 
-{
-    // 1) Open the compressed archive file
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::cerr << "Usage:\n  " << argv[0] << " <archive.tcdb> [search_term] [--type=IP|TS|NUM]\n";
+        return 1;
+    }
+
+    std::string archive_path = argv[1];
+    std::string search_term;
+    std::string type_filter;
+    if (argc >= 3) {
+        search_term = argv[2];
+    }
+    if (argc >= 4 && std::string(argv[3]).rfind("--type=", 0) == 0) {
+        type_filter = std::string(argv[3]).substr(7);
+    }
+
+    // 1) open the archive
     std::ifstream in(archive_path, std::ios::binary);
     if (!in.is_open()) {
         std::cerr << "❌ Cannot open archive: " << archive_path << "\n";
-        return false;
+        return 1;
     }
 
-    // 2) Verify magic
+    // 2) read magic
     char magic[4];
     in.read(magic, 4);
     if (std::strncmp(magic, "TCDZ", 4) != 0) {
         std::cerr << "❌ Invalid archive format.\n";
-        return false;
+        return 1;
     }
 
-    // 3) Load metadata from .meta.db (templates, variables, types, filenames)
+    // 3) load metadata
     sqlite3* db = nullptr;
     std::vector<std::string> templates, variables, filenames;
     std::vector<VarType> types;
 
     std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
     std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
-
     if (sqlite3_open(meta_path.string().c_str(), &db) != SQLITE_OK) {
-        std::cerr << "❌ Failed to open meta.db at: " << meta_path << "\n";
-        return false;
+        std::cerr << "❌ Failed to open meta.db.\n";
+        return 1;
     }
     if (!load_templates_and_variables(db, templates, variables, types, filenames)) {
         std::cerr << "❌ Failed to load from meta.db\n";
         sqlite3_close(db);
-        return false;
+        return 1;
     }
     sqlite3_close(db);
 
-    // Build zlib dictionary
+    // build dictionary
     std::string dict;
-    dict.reserve(templates.size() * 50 + variables.size() * 20 + filenames.size() * 10);
-    for (auto& t : templates)  dict += t;
-    for (auto& v : variables)  dict += v;
-    for (auto& f : filenames)  dict += f;
+    dict.reserve(templates.size()*40 + variables.size()*20 + filenames.size()*10);
+    for (auto &t : templates)  dict += t;
+    for (auto &v : variables)  dict += v;
+    for (auto &f : filenames)  dict += f;
 
-    // 4) Prepare the search logic (regex or substring)
-    std::regex search_regex;
+    std::cout << "[DEBUG] templates.size()=" << templates.size()
+              << ", variables.size()=" << variables.size()
+              << ", types.size()=" << types.size()
+              << ", filenames.size()=" << filenames.size() << "\n";
+
+    // 4) parse search logic
     bool use_regex = false;
-    std::string rough_substr; // optional substring to skip expensive regex
-
-    if (!search_term.empty() &&
+    std::regex search_regex;
+    std::string rough_substr;
+    if (!search_term.empty() && 
         (search_term.find('*') != std::string::npos || search_term.find('?') != std::string::npos)) 
     {
-        // Convert wildcard * / ? to a basic regex
         std::string pattern;
         for (char c : search_term) {
             if      (c == '*')  pattern += ".*";
             else if (c == '?')  pattern += ".";
-            else if (std::string(".^$\\[](){}+|").find(c) != std::string::npos) pattern += '\\', pattern += c;
-            else    pattern += c;
+            else if (std::string(".^$\\[](){}+|").find(c) != std::string::npos) {
+                pattern += '\\'; pattern += c;
+            } else {
+                pattern += c;
+            }
         }
         search_regex = std::regex(pattern);
         use_regex = true;
-
-        // If there's an initial literal portion (ex: "abc*"), keep it for quick substring check
         size_t starPos = search_term.find('*');
         if (starPos != std::string::npos && starPos > 0) {
             rough_substr = search_term.substr(0, starPos);
         }
     }
 
-    VarType filter_type    = parse_filter_type(type_filter);
+    VarType filter_type = parse_filter_type(type_filter);
     bool apply_type_filter = !type_filter.empty();
-    size_t match_count     = 0;
-
-    // 5) Read blocks until EOF
+    size_t match_count = 0;
     int block_index = 0;
+
+    // 5) read blocks
     while (in.peek() != EOF) {
-        // lines in block, uncompressed size, compressed size
-        if (!in.good()) break; // safety
+        if (!in.good()) break;
         uint32_t lines  = read_u32(in);
         if (!in.good()) break;
         uint32_t uncomp = read_u32(in);
@@ -151,58 +158,60 @@ bool search_archive_template_zlib(const std::string& archive_path,
         uint32_t comp   = read_u32(in);
         if (!in.good()) break;
 
-        // read compressed data
-        std::vector<char> comp_buf(comp);
-        in.read(comp_buf.data(), comp);
-        if (in.gcount() < (std::streamsize)comp) {
-            std::cerr << "❌ Truncated block data.\n";
-            return false;
-        }
-
-        // Decompress block
-        std::vector<char> block;
-        if (!zlib_decompress_block(comp_buf, uncomp, block, dict)) {
-            std::cerr << "❌ Decompression failed (block#" << block_index << ").\n";
-            return false;
-        }
+        std::cout << "[DEBUG] block#" << block_index 
+                  << " lines=" << lines 
+                  << " uncomp=" << uncomp 
+                  << " comp=" << comp << "\n";
         block_index++;
 
-        // parse lines
+        std::vector<char> comp_buf(comp);
+        in.read(comp_buf.data(), comp);
+        if ((size_t)in.gcount() < comp) {
+            std::cerr << "❌ Truncated block.\n";
+            return 1;
+        }
+
+        std::vector<char> block;
+        if (!zlib_decompress_block(comp_buf, uncomp, block, dict)) {
+            std::cerr << "❌ Decompression failed at block#" << (block_index - 1) << "\n";
+            return 1;
+        }
+
         const char* p = block.data();
         size_t block_size = block.size();
-        for (uint32_t line_idx = 0; line_idx < lines; line_idx++) {
+        for (uint32_t iLine = 0; iLine < lines; iLine++) {
+            // we expect at least 3 * 4 bytes => file_id, tpl_id, var_count
             if ((p + 12) > (block.data() + block_size)) {
-                // not enough data to read tpl_id + var_count + ...
-                std::cerr << "❌ Block data truncated reading line#" 
-                          << line_idx << " of block#" << (block_index - 1) << "\n";
-                return false;
+                std::cerr << "❌ Block data truncated reading line#" << iLine << "\n";
+                return 1;
             }
-            
+
+            // *** READ file_id FIRST ***
             uint32_t file_id   = read_u32_mem(p); // SHIFT
-            uint32_t tpl_id    = read_u32_mem(p);
+            uint32_t tpl_id    = read_u32_mem(p); // SHIFT
             uint32_t var_count = read_u32_mem(p);
 
-            // read var_ids
+            if ((p + var_count*4) > (block.data() + block_size)) {
+                std::cerr << "❌ Block data truncated reading var_ids at line#" 
+                          << iLine << " (var_count=" << var_count << ")\n";
+                return 1;
+            }
             std::vector<uint32_t> var_ids(var_count);
             for (uint32_t j = 0; j < var_count; j++) {
-                if ((p + 4) > (block.data() + block_size)) {
-                    std::cerr << "❌ Block data truncated while reading var_ids.\n";
-                    return false;
-                }
                 var_ids[j] = read_u32_mem(p);
             }
 
-            // validate tpl_id
+            // bounds check on tpl_id
             if (tpl_id >= templates.size()) {
-                // out-of-range => skip line
+                std::cerr << "[DEBUG] tpl_id out of range => "
+                          << tpl_id << " >= templates.size()=" << templates.size() << "\n";
                 continue;
             }
-            const std::string& tpl = templates[tpl_id];
 
-            // if type filter => check if at least one var matches that type
+            // type filter => see if line has that type
             bool hasType = false;
             if (apply_type_filter) {
-                for (auto v_id : var_ids) {
+                for (uint32_t v_id : var_ids) {
                     if (v_id < types.size() && types[v_id] == filter_type) {
                         hasType = true;
                         break;
@@ -210,13 +219,15 @@ bool search_archive_template_zlib(const std::string& archive_path,
                 }
             }
             if (apply_type_filter && !hasType) {
-                // skip entire line if it doesn't contain the requested type
+                // skip line
                 continue;
             }
 
-            // Reconstruct line by substituting <VAR> placeholders
+            // reconstruct line
+            const std::string &tpl = templates[tpl_id];
             std::string reconstructed;
             reconstructed.reserve(tpl.size() + var_count * 12);
+
             size_t last = 0, vi = 0;
             while (true) {
                 size_t pos = tpl.find("<VAR>", last);
@@ -226,7 +237,6 @@ bool search_archive_template_zlib(const std::string& archive_path,
                 }
                 reconstructed.append(tpl, last, pos - last);
 
-                // variable substitution
                 std::string val = "???";
                 if (vi < var_ids.size()) {
                     uint32_t v_id = var_ids[vi];
@@ -235,36 +245,32 @@ bool search_archive_template_zlib(const std::string& archive_path,
                     }
                 }
                 reconstructed += val;
-                last = pos + 5; // skip "<VAR>"
+                last = pos + 5;
                 vi++;
             }
 
-            // Now run the text search
-            bool match = false;
+            // now do search
+            bool matched = false;
             if (search_term.empty()) {
-                match = true;
+                matched = true;
             }
             else if (use_regex) {
-                // optional substring pre-check
                 if (!rough_substr.empty() && reconstructed.find(rough_substr) == std::string::npos) {
-                    match = false;
+                    matched = false;
                 } else {
-                    match = std::regex_search(reconstructed, search_regex);
+                    matched = std::regex_search(reconstructed, search_regex);
                 }
             } else {
-                // plain substring
-                match = (reconstructed.find(search_term) != std::string::npos);
+                matched = (reconstructed.find(search_term) != std::string::npos);
             }
 
-            // if matched => print
-            if (match) {
+            if (matched) {
                 match_count++;
                 std::cout << reconstructed << "\n";
             }
         }
     }
 
-    // done
     std::cout << "\nFound " << match_count << " matches.\n";
-    return true;
+    return 0;
 }

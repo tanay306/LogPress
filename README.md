@@ -1,75 +1,140 @@
-# Template-Based Log Compressor & Searcher
+# Logpress: Template-Based Log Compressor & Searcher 🚀
 
-This project provides a command-line utility to compress log files using a template-based approach combined with zlib compression. It supports three main commands:
+**Logpress** is a command-line utility designed to efficiently compress, decompress, and search log files using a template-based approach. It leverages zlib (with a custom dictionary) to achieve high compression rates by deduplicating common log patterns.
 
-- **compress**: Compress one or more log files into a single archive.
-- **decompress**: Decompress an archive and reconstruct the original log files.
-- **search**: Search within the compressed archive for log lines matching a given search term.
+## Features ✨
 
-The archive format starts with the magic `"TMZL"`, followed by the uncompressed size, compressed size, and the zlib-compressed data. The internal uncompressed data begins with `"TMPL"` and includes the dictionary of templates, log lines, and filenames.
+- **Compress:** Bundle one or more log files into a single archive.
+- **Decompress:** Reconstruct original log files from a compressed archive.
+- **Search:** Quickly search through compressed logs for specific terms—without fully decompressing the archive.
 
-## Prerequisites
+## Archive Format 🗃️
 
-- A C++ compiler with C++17 support (e.g., g++ or clang++).
-- [zlib](https://zlib.net/) development library installed (link with `-lz`).
+An archive created by Logpress consists of:
+- A file header starting with the magic string `"TMZL"`.
+- A global metadata section (prefixed with `"TMPL"`) that includes a dictionary of templates, variables, and filenames.
+- One or more compressed blocks containing the actual log data, compressed using zlib with a custom dictionary.
 
-## Building the Project
+## Prerequisites ✅
 
-To compile the project, use a command similar to the following. Adjust the source file names as necessary if your project is split into multiple files (e.g., `compressor.cpp`, `decompressor.cpp`, `searcher.cpp`, and `main.cpp`):
+- A C++ compiler with C++17 support (e.g., **g++** or **clang++**).
+- [zlib](https://zlib.net/) development library (ensure you link with `-lz`).
+- *(Optional)* [CMake](https://cmake.org/) for generating the build configuration.
+
+## Building the Project 🛠️
+
+### Using g++ Directly
 
 ```bash
-g++ -std=c++17 -O2 -lz main.cpp -o logpress
+g++ -std=c++17 -O2 -lz main.cpp compressor.cpp decompressor.cpp searcher.cpp sqlite_helper.cpp -o logpress
 ```
-Make sure that the include paths for zlib and the standard library are set correctly if they’re not in your default locations.
 
-## Usage
+*Adjust the source file names if your project structure differs.*
 
-Once compiled, the executable (here called `logpress`) supports the following commands:
+### Using CMake
 
-### Compressing Files
+1. **Generate Build System (output goes to `./build`):**
 
-To compress one or more log files into an archive:
+   ```bash
+   cmake -S . -B build
+   ```
+
+2. **Build the Project:**
+
+   ```bash
+   cmake --build build
+   ```
+
+3. **Run the Executable:**
+
+   ```bash
+   ./build/logpress
+   ```
+
+## Usage 📖
+
+Once compiled, the executable (named **logpress**) supports the following commands:
+
+### 1. Compressing Files
+
+Compress one or more log files into a single archive.
 
 ```bash
 ./logpress compress <archive> <file1> [file2 ...]
 ```
 
-Example:
+**Example:**
 
 ```bash
 ./logpress compress archive.tmzl log1.txt log2.txt
 ```
 
-This command reads `log1.txt` and `log2.txt`, compresses them using the template-based approach combined with zlib, and creates an archive file named `archive.tmzl`.
+> This reads `log1.txt` and `log2.txt`, compresses them using a template-based approach combined with zlib compression, and produces an archive called `archive.tmzl`.
 
-### Decompressing an Archive
+### 2. Decompressing an Archive
 
-To decompress an archive and reconstruct the original log files into an output folder:
+Reconstruct the original log files from an archive into a specified output folder.
 
 ```bash
 ./logpress decompress <archive> <output_folder>
 ```
 
-Example:
+**Example:**
 
 ```bash
 ./logpress decompress archive.tmzl output_logs
 ```
 
-This command extracts the compressed data from `archive.tmzl` and writes the reconstructed log files to the directory `output_logs`.
+> This extracts the compressed data from `archive.tmzl` and writes the reconstructed logs into the `output_logs` directory.
 
-### Searching Within an Archive
+### 3. Searching Within an Archive
 
-To search for a specific term in the archive without decompressing all files:
+Search for log lines matching a specific term within an archive without needing to decompress all files.
 
 ```bash
 ./logpress search <archive> <search_term>
 ```
 
-Example:
+**Example:**
 
 ```bash
 ./logpress search archive.tmzl "ERROR"
 ```
 
-This command searches the archive for any log lines containing the term "ERROR" and prints out the matching lines along with the corresponding filename.
+> This command searches the archive for any log lines containing the term `"ERROR"` and prints the matching lines along with their corresponding filenames.
+
+## Internal Details 🔍
+
+- **Template-Based Compression:**  
+  Logpress deduplicates log entries by extracting and compressing common templates and numeric tokens.  
+- **Custom Zlib Dictionary:**  
+  A custom dictionary is generated from templates, filenames, and variables. This dictionary is used during compression (and decompression) to improve compression ratios.
+- **Metadata Storage:**  
+  A SQLite database is used to store metadata such as templates, variable values, and file names. This helps in reconstructing the original logs accurately.
+- **Regex-Based Classification:**  
+  The project includes several regex patterns for classifying numeric tokens (e.g., IP addresses and timestamps), which are used during the template creation process.
+
+## Additional Notes 📝
+
+- **Emojis & Visual Clarity:**  
+  Emojis are used throughout the README to enhance readability and make the user guide more engaging.
+- **Project Structure:**  
+  Core source files include:
+  - `compressor.cpp`
+  - `decompressor.cpp`
+  - `searcher.cpp`
+  - `sqlite_helper.cpp`
+  - `main.cpp`
+- **Troubleshooting:**  
+  - Ensure `zlib` is correctly installed and linked (use `-lz`).
+  - For sqlite issues, if you're using Homebrew on macOS, you may need to adjust your PATH or force-link sqlite:
+    ```bash
+    brew link sqlite --force
+    ```
+    or add:
+    ```bash
+    export PATH="/opt/homebrew/opt/sqlite/bin:$PATH"
+    ```
+    to your `~/.zshrc`.
+
+Enjoy using **Logpress** to effectively manage and search through your logs! 🎉

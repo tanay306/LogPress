@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+      {
+          "name": "Debug logpress compress",
+          "type": "cppdbg",
+          "request": "launch",
+          "program": "${workspaceFolder}/build/logpress",
+          "args": [
+              "compress",
+              "archive.lgp",
+              "${workspaceFolder}/input/HDFS_2k.log"
+          ],
+          "stopAtEntry": true,
+          "cwd": "${workspaceFolder}",
+          "environment": [],
+          "externalConsole": false,
+          "MIMode": "lldb",
+          "miDebuggerPath": "/usr/bin/lldb",
+          "setupCommands": [
+              {
+                  "description": "Enable pretty-printing for LLDB",
+                  "text": "-enable-pretty-printing",
+                  "ignoreFailures": true
+              }
+          ],
+          "preLaunchTask": "build"
+      },
+      {
+          "name": "Debug logpress decompress",
+          "type": "cppdbg",
+          "request": "launch",
+          "program": "${workspaceFolder}/build/logpress",
+          "args": [
+              "decompress",
+              "archive.lgp",
+              "${workspaceFolder}/output/HDFS_2k.log"
+          ],
+          "stopAtEntry": true,
+          "cwd": "${workspaceFolder}",
+          "environment": [],
+          "externalConsole": false,
+          "MIMode": "lldb",
+          "miDebuggerPath": "/usr/bin/lldb",
+          "setupCommands": [
+              {
+                  "description": "Enable pretty-printing for LLDB",
+                  "text": "-enable-pretty-printing",
+                  "ignoreFailures": true
+              }
+          ],
+          "preLaunchTask": "build"
+      }
+  ]
+}
