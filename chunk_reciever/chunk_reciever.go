@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 )
 
 func main() {
@@ -18,9 +19,25 @@ func main() {
 		port = ":" + os.Args[1]
 	}
 
+	dirPath := fmt.Sprintf("chunks%s", port)
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		err := os.MkdirAll(dirPath, 0755)
+		if err != nil {
+			fmt.Println("Error creating directory:", err)
+			return
+		}
+	}
+
 	http.HandleFunc("/receive-chunk", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Get sequence number from header
+		seq := r.Header.Get("X-Sequence")
+		if seq == "" {
+			http.Error(w, "Missing sequence number", http.StatusBadRequest)
 			return
 		}
 
@@ -30,10 +47,26 @@ func main() {
 			return
 		}
 
-		filename := fmt.Sprintf("chunk%s.txt", port)
+		// Save with sequence number
+		filename := fmt.Sprintf("chunks%s/chunk_%s.txt", port, seq)
 		err = os.WriteFile(filename, data, 0644)
 		if err != nil {
 			http.Error(w, "Error writing file", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	})
+
+	http.HandleFunc("/compress", func(w http.ResponseWriter, r *http.Request) {
+		cmd := exec.Command("../logpress", "compress", "compressed_archive"+port+".mylp", "chunks"+port)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		fmt.Println("Starting compression...")
+		if err := cmd.Run(); err != nil {
+			println("err", err.Error())
+			w.WriteHeader(500)
 			return
 		}
 

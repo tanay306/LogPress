@@ -1,6 +1,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <queue>
 
 #include "compressor.hpp"
 #include "decompressor.hpp"
@@ -23,8 +25,26 @@ int main(int argc, char* argv[]) {
         }
         std::string archive_path = argv[2];
         std::vector<std::string> input_paths;
-        for (int i = 3; i < argc; i++) {
-            input_paths.push_back(argv[i]);
+        std::queue<std::string> paths;
+        for (int i = 3; i < argc; i++)
+        {
+            paths.push(argv[i]);
+        }
+        while (!paths.empty())
+        {
+            auto path = paths.front();
+            paths.pop();
+            if (std::filesystem::is_directory(path))
+            {
+                for (const auto &entry : std::filesystem::directory_iterator(path))
+                {
+                    paths.push(entry.path());
+                }
+            }
+            else
+            {
+                input_paths.push_back(path);
+            }
         }
         if (!compress_files_template_zlib(input_paths, archive_path)) {
             std::cerr << "Compression failed.\n";

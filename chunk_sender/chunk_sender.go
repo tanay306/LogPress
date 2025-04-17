@@ -5,12 +5,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
 
 const (
-	chunkSize     = 1000
+	chunkSize     = 200
 	maxConcurrent = 100
 )
 
@@ -34,7 +35,7 @@ func main() {
 		workers := []string{}
 
 		for port := 3; port < len(os.Args); port++ {
-			workers = append(workers, "http://localhost:"+os.Args[port]+"/receive-chunk")
+			workers = append(workers, "http://localhost:"+os.Args[port])
 		}
 
 		file, err := os.Open(fileName)
@@ -49,6 +50,7 @@ func main() {
 
 		workerIndex := 0
 		chunk := make([]string, 0, chunkSize)
+		sequence := 0
 
 		for scanner.Scan() {
 			chunk = append(chunk, scanner.Text())
@@ -57,43 +59,61 @@ func main() {
 				sem <- struct{}{}
 
 				data := strings.Join(chunk, "\n")
-				target := workers[workerIndex%len(workers)]
-				workerIndex++
+				target := workers[workerIndex%len(workers)] + "/receive-chunk"
+				currentSeq := sequence
+				sequence++
 
-				go func(data, target string) {
+				go func(data, target string, seq int) {
 					defer func() {
 						<-sem
 						wg.Done()
 					}()
 
-					resp, err := http.Post(target, "text/plain", strings.NewReader(data))
+					req, err := http.NewRequest("POST", target, strings.NewReader(data))
 					if err != nil {
-						log.Printf("Error sending to %s: %v", target, err)
+						log.Printf("Error creating request: %v", err)
+						return
+					}
+					req.Header.Set("X-Sequence", strconv.Itoa(seq))
+
+					resp, err := http.DefaultClient.Do(req)
+					if err != nil {
+						log.Printf("Error sending chunk %d: %v", seq, err)
 						return
 					}
 					defer resp.Body.Close()
 					if resp.StatusCode != http.StatusOK {
-						log.Printf("Non-OK response from %s: %d", target, resp.StatusCode)
+						log.Printf("Non-OK response for chunk %d: %d", seq, resp.StatusCode)
 					}
-				}(data, target)
+				}(data, target, currentSeq)
 
+				workerIndex++
 				chunk = make([]string, 0, chunkSize)
 			}
 		}
 
+		// Handle remaining lines
 		if len(chunk) > 0 {
 			data := strings.Join(chunk, "\n")
 			target := workers[workerIndex%len(workers)]
+			currentSeq := sequence
 
-			resp, err := http.Post(target, "text/plain", strings.NewReader(data))
+			req, err := http.NewRequest("POST", target, strings.NewReader(data))
 			if err != nil {
-				log.Printf("Error sending final chunk to %s: %v", target, err)
+				log.Fatal(err)
+			}
+			req.Header.Set("X-Sequence", strconv.Itoa(currentSeq))
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				log.Printf("Error sending final chunk: %v", err)
 			} else {
 				defer resp.Body.Close()
 				if resp.StatusCode != http.StatusOK {
-					log.Printf("Non-OK final response from %s: %d", target, resp.StatusCode)
+					log.Printf("Non-OK final response: %d", resp.StatusCode)
 				}
 			}
+			sequence++
 		}
 
 		if err := scanner.Err(); err != nil {
@@ -101,6 +121,29 @@ func main() {
 		}
 
 		wg.Wait()
+
+		var wg2 sync.WaitGroup
+		successChan := make(chan bool, len(workers))
+
+		for _, url := range workers {
+			wg2.Add(1)
+			go func(url string) {
+				defer wg2.Done()
+				// for {
+				resp, err := http.Get(url + "/compress")
+				if err == nil && resp.StatusCode == http.StatusOK {
+					successChan <- true
+					return
+				}
+				// You can add a small delay here if you want to avoid aggressive retries
+				// }
+				println("failed compression for" + url)
+			}(url)
+		}
+
+		// Wait until all requests have returned 200 OK
+		wg2.Wait()
+		close(successChan)
 
 		println("compressed file", fileName)
 
