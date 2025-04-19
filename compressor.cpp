@@ -128,12 +128,15 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
     }
 
 
-    std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
+    // std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
+    // Build meta database path: "db/<archive_filename>.meta.db"
+    std::filesystem::path archive_p(archive_path);
+    std::filesystem::path meta_path = "./db/" + (archive_p.filename().string() + ".meta.db");
     std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
 
     // SQLite metadata
     sqlite3* db = nullptr;
-    if (!initialize_db(db, archive_path + ".meta.db")) {
+    if (!initialize_db(db, meta_path.string())) {
         std::cerr << "Failed to init SQLite.\n";
         return false;
     }

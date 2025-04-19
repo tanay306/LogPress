@@ -9,6 +9,8 @@
 #include <cstring>
 #include <filesystem>
 #include <zlib.h>
+#include <chrono>   // for timing
+#include <cstdint>  // for uint32_t
 
 // Utility to read 4 bytes as uint32_t from file
 static uint32_t read_u32(std::ifstream& in) {
@@ -64,10 +66,83 @@ VarType parse_filter_type(const std::string& input) {
     return VarType::NUM; // fallback
 }
 
+// A helper to highlight all literal occurrences of "search_term" in "line" using ANSI codes.
+static std::string highlightLiteral(const std::string& line, const std::string& search_term) {
+    if (search_term.empty()) return line;  // nothing to highlight
+
+    // We'll do a simple repeated   find and replace with ANSI wrapping
+    // \x1B[1;31m = bright red start, \x1B[0m = reset
+    const std::string start_highlight = "\x1B[1;31m";
+    const std::string end_highlight   = "\x1B[0m";
+
+    std::string result;
+    result.reserve(line.size() + 16); // small buffer overhead
+    size_t pos = 0;
+    while (true) {
+        size_t found = line.find(search_term, pos);
+        if (found == std::string::npos) {
+            // no more occurrences
+            result.append(line, pos);
+            break;
+        }
+        // copy everything up to 'found'
+        result.append(line, pos, found - pos);
+        // insert highlight
+        result.append(start_highlight);
+        result.append(search_term);
+        result.append(end_highlight);
+        // move pos
+        pos = found + search_term.size();
+    }
+    return result;
+}
+
+// Return a list of literal segments from a wildcard pattern
+static std::vector<std::string> extractLiteralSegments(const std::string& pattern) {
+    std::vector<std::string> segments;
+    std::string buffer;
+
+    for (char c : pattern) {
+        if (c == '*' || c == '?') {
+            // flush buffer
+            if (!buffer.empty()) {
+                segments.push_back(buffer);
+                buffer.clear();
+            }
+            // skip the wildcard
+        } else {
+            // accumulate literal char
+            buffer.push_back(c);
+        }
+    }
+    // final flush
+    if (!buffer.empty()) {
+        segments.push_back(buffer);
+    }
+    return segments;
+}
+
+// 3) highlightAllSegments: apply highlightLiteral to each segment in turn
+static std::string highlightAllSegments(std::string line,
+    const std::vector<std::string>& segments) {
+    for (auto &seg : segments) {
+        line = highlightLiteral(line, seg);
+    }
+    return line;
+}
+
+
 bool search_archive_template_zlib(const std::string& archive_path,
                                   const std::string& search_term,
                                   const std::string& type_filter) 
 {
+
+    using clock = std::chrono::steady_clock;
+
+    auto search_start_time = clock::now();
+    bool found_first_match = false;
+    std::chrono::time_point<clock> first_match_time;
+
     // 1) Open the compressed archive file
     std::ifstream in(archive_path, std::ios::binary);
     if (!in.is_open()) {
@@ -88,7 +163,9 @@ bool search_archive_template_zlib(const std::string& archive_path,
     std::vector<std::string> templates, variables, filenames;
     std::vector<VarType> types;
 
-    std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
+    // std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
+    std::filesystem::path archive_p(archive_path);
+    std::filesystem::path meta_path = "./db/" + (archive_p.filename().string() + ".meta.db");
     std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
 
     if (sqlite3_open(meta_path.string().c_str(), &db) != SQLITE_OK) {
@@ -138,6 +215,12 @@ bool search_archive_template_zlib(const std::string& archive_path,
     VarType filter_type    = parse_filter_type(type_filter);
     bool apply_type_filter = !type_filter.empty();
     size_t match_count     = 0;
+    size_t lines_scanned = 0;
+
+    std::vector<std::string> literalSegments;
+    if (use_regex) {
+        literalSegments = extractLiteralSegments(search_term);
+    }
 
     // 5) Read blocks until EOF
     int block_index = 0;
@@ -171,13 +254,14 @@ bool search_archive_template_zlib(const std::string& archive_path,
         const char* p = block.data();
         size_t block_size = block.size();
         for (uint32_t line_idx = 0; line_idx < lines; line_idx++) {
+            lines_scanned++;
             if ((p + 12) > (block.data() + block_size)) {
                 // not enough data to read tpl_id + var_count + ...
                 std::cerr << "❌ Block data truncated reading line#" 
                           << line_idx << " of block#" << (block_index - 1) << "\n";
                 return false;
             }
-            
+
             uint32_t file_id   = read_u32_mem(p); // SHIFT
             uint32_t tpl_id    = read_u32_mem(p);
             uint32_t var_count = read_u32_mem(p);
@@ -250,21 +334,46 @@ bool search_archive_template_zlib(const std::string& archive_path,
                     match = false;
                 } else {
                     match = std::regex_search(reconstructed, search_regex);
+                    // if matched, do partial highlight of literal segments
+                    if (match) {
+                        reconstructed = highlightAllSegments(reconstructed, literalSegments);
+                    }
+
                 }
             } else {
-                // plain substring
-                match = (reconstructed.find(search_term) != std::string::npos);
+                // literal substring search => also highlight
+                size_t found_pos = reconstructed.find(search_term);
+                if (found_pos != std::string::npos) {
+                    match = true;
+                    // highlight all occurrences
+                    reconstructed = highlightLiteral(reconstructed, search_term);
+                }
             }
 
             // if matched => print
             if (match) {
-                match_count++;
+                if (!found_first_match) {
+                    found_first_match = true;
+                    first_match_time  = clock::now();
+                }
                 std::cout << reconstructed << "\n";
+                match_count++;
+
             }
         }
     }
 
     // done
-    std::cout << "\nFound " << match_count << " matches.\n";
+    auto end_time = clock::now();
+    double total_sec = std::chrono::duration<double>(end_time - search_start_time).count();
+    std::cout << "\nScanned " << block_index << " blocks, " << lines_scanned << " lines.\n";
+    std::cout << "Found " << match_count << " matches.\n";
+
+    if (found_first_match) {
+        double first_match_sec = std::chrono::duration<double>(first_match_time - search_start_time).count();
+        std::cout << "Time to first match: " << first_match_sec << "s\n";
+    }
+    std::cout << "Total search time: " << total_sec << "s\n";
+
     return true;
 }

@@ -70,7 +70,9 @@ bool decompress_files_template_zlib(const std::string& archive_path,
     std::vector<std::string> templates, variables, filenames;
     std::vector<VarType> types;
 
-    std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
+    // std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
+    std::filesystem::path archive_p(archive_path);
+    std::filesystem::path meta_path = "./db/" + (archive_p.filename().string() + ".meta.db");
     std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
 
     
