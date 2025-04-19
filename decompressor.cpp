@@ -68,7 +68,6 @@ bool decompress_files_template_zlib(const std::string& archive_path,
     // Load metadata
     sqlite3* db = nullptr;
     std::vector<std::string> templates, variables, filenames;
-    std::vector<VarType> types;
 
     // std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
     std::filesystem::path archive_p(archive_path);
@@ -81,7 +80,7 @@ bool decompress_files_template_zlib(const std::string& archive_path,
                   << archive_path + ".meta.db" << "\n";
         return false;
     }
-    if (!load_templates_and_variables(db, templates, variables, types, filenames)) {
+    if (!load_templates_and_variables(db, templates, variables, filenames)) {
         std::cerr << "❌ Failed to load from meta.db\n";
         return false;
     }
@@ -110,7 +109,7 @@ bool decompress_files_template_zlib(const std::string& archive_path,
         }
     }
 
-    size_t ip_count = 0, ts_count = 0, num_count = 0;
+    size_t num_count = 0;
     size_t total_lines = 0;
     int block_id = 0;
 
@@ -137,10 +136,10 @@ bool decompress_files_template_zlib(const std::string& archive_path,
             return false;
         }
 
-        std::cerr << "📦 Block #" << block_id++
-                  << ": lines=" << lines
-                  << ", comp=" << compressed_size
-                  << ", uncomp=" << uncompressed_size << "\n";
+        // std::cerr << "📦 Block #" << block_id++
+        //           << ": lines=" << lines
+        //           << ", comp=" << compressed_size
+        //           << ", uncomp=" << uncompressed_size << "\n";
 
         const char* p = block.data();
         for (uint32_t i = 0; i < lines; ++i) {
@@ -165,11 +164,7 @@ bool decompress_files_template_zlib(const std::string& archive_path,
                 reconstructed.append(tpl, last, pos - last);
                 if (vi < var_ids.size() && var_ids[vi] < variables.size()) {
                     reconstructed += variables[var_ids[vi]];
-                    switch (types[var_ids[vi]]) {
-                        case VarType::IP: ip_count++; break;
-                        case VarType::TS: ts_count++; break;
-                        case VarType::NUM: num_count++; break;
-                    }
+                    num_count++;
                 } else {
                     reconstructed += "???";
                 }
@@ -191,10 +186,8 @@ bool decompress_files_template_zlib(const std::string& archive_path,
 
     std::cout << "✅ Decompressed " << total_lines << " lines into " << filenames.size() << " files.\n";
     std::cout << "📊 Variable usage:\n";
-    std::cout << "   IPs: " << ip_count << "\n";
-    std::cout << "   TS : " << ts_count << "\n";
     std::cout << "   NUM: " << num_count << "\n";
-    std::cout << "🧠 Dict Size: " << dict.size() << " bytes (saved to decompression.dict)\n";
+    std::cout << "🧠 Dict Size: " << dict.size() / (1000 * 1000) << " mb (saved to decompression.dict)\n";
 
     return true;
 }

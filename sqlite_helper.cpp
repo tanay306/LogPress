@@ -12,7 +12,7 @@ bool initialize_db(sqlite3*& db, const std::string& db_path) {
         DROP TABLE IF EXISTS files;
 
         CREATE TABLE templates (id INTEGER PRIMARY KEY, template TEXT);
-        CREATE TABLE variables (id INTEGER PRIMARY KEY, value TEXT, type TEXT);
+        CREATE TABLE variables (id INTEGER PRIMARY KEY, value TEXT);
         CREATE TABLE files (id INTEGER PRIMARY KEY, filename TEXT);
     )";
     char* errMsg = nullptr;
@@ -24,19 +24,9 @@ bool initialize_db(sqlite3*& db, const std::string& db_path) {
     return true;
 }
 
-std::string to_type_string(VarType t) {
-    switch (t) {
-        case VarType::IP: return "IP";
-        case VarType::TS: return "TS";
-        case VarType::NUM: return "NUM";
-    }
-    return "NUM";
-}
-
 bool store_templates_and_variables(sqlite3* db,
                                    const std::vector<std::string>& templates,
                                    const std::vector<std::string>& variables,
-                                   const std::vector<VarType>& types,
                                    const std::vector<std::string>& files) {
     std::cout << "[SQLITE] Inserting "
               << templates.size() << " templates, "
@@ -63,11 +53,10 @@ bool store_templates_and_variables(sqlite3* db,
     sqlite3_finalize(stmt);
 
     // Insert variables
-    sqlite3_prepare_v2(db, "INSERT INTO variables (id, value, type) VALUES (?, ?, ?);", -1, &stmt, nullptr);
+    sqlite3_prepare_v2(db, "INSERT INTO variables (id, value) VALUES (?, ?);", -1, &stmt, nullptr);
     for (size_t i = 0; i < variables.size(); ++i) {
         sqlite3_bind_int(stmt, 1, i);
         sqlite3_bind_text(stmt, 2, variables[i].c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 3, to_type_string(types[i]).c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(stmt) != SQLITE_DONE) {
             std::cerr << "❌ Insert variable failed: " << sqlite3_errmsg(db) << "\n";
         }
@@ -96,7 +85,6 @@ bool store_templates_and_variables(sqlite3* db,
 bool load_templates_and_variables(sqlite3* db,
                                   std::vector<std::string>& templates,
                                   std::vector<std::string>& variables,
-                                  std::vector<VarType>& types,
                                   std::vector<std::string>& files) {
     sqlite3_stmt* stmt;
 
@@ -106,13 +94,9 @@ bool load_templates_and_variables(sqlite3* db,
     }
     sqlite3_finalize(stmt);
 
-    sqlite3_prepare_v2(db, "SELECT value, type FROM variables ORDER BY id;", -1, &stmt, nullptr);
+    sqlite3_prepare_v2(db, "SELECT value FROM variables ORDER BY id;", -1, &stmt, nullptr);
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         variables.push_back(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
-        std::string type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-        if (type == "IP") types.push_back(VarType::IP);
-        else if (type == "TS") types.push_back(VarType::TS);
-        else types.push_back(VarType::NUM);
     }
     sqlite3_finalize(stmt);
 

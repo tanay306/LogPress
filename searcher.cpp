@@ -58,14 +58,6 @@ static bool zlib_decompress_block(const std::vector<char>& in_data,
     return ok;
 }
 
-// Map user-provided --type=IP/TS/NUM to VarType
-VarType parse_filter_type(const std::string& input) {
-    if (input == "IP")  return VarType::IP;
-    if (input == "TS")  return VarType::TS;
-    if (input == "NUM") return VarType::NUM;
-    return VarType::NUM; // fallback
-}
-
 // A helper to highlight all literal occurrences of "search_term" in "line" using ANSI codes.
 static std::string highlightLiteral(const std::string& line, const std::string& search_term) {
     if (search_term.empty()) return line;  // nothing to highlight
@@ -133,8 +125,7 @@ static std::string highlightAllSegments(std::string line,
 
 
 bool search_archive_template_zlib(const std::string& archive_path,
-                                  const std::string& search_term,
-                                  const std::string& type_filter) 
+                                  const std::string& search_term) 
 {
 
     using clock = std::chrono::steady_clock;
@@ -161,7 +152,6 @@ bool search_archive_template_zlib(const std::string& archive_path,
     // 3) Load metadata from .meta.db (templates, variables, types, filenames)
     sqlite3* db = nullptr;
     std::vector<std::string> templates, variables, filenames;
-    std::vector<VarType> types;
 
     // std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
     std::filesystem::path archive_p(archive_path);
@@ -172,7 +162,7 @@ bool search_archive_template_zlib(const std::string& archive_path,
         std::cerr << "❌ Failed to open meta.db at: " << meta_path << "\n";
         return false;
     }
-    if (!load_templates_and_variables(db, templates, variables, types, filenames)) {
+    if (!load_templates_and_variables(db, templates, variables, filenames)) {
         std::cerr << "❌ Failed to load from meta.db\n";
         sqlite3_close(db);
         return false;
@@ -212,8 +202,6 @@ bool search_archive_template_zlib(const std::string& archive_path,
         }
     }
 
-    VarType filter_type    = parse_filter_type(type_filter);
-    bool apply_type_filter = !type_filter.empty();
     size_t match_count     = 0;
     size_t lines_scanned = 0;
 
@@ -282,21 +270,6 @@ bool search_archive_template_zlib(const std::string& archive_path,
                 continue;
             }
             const std::string& tpl = templates[tpl_id];
-
-            // if type filter => check if at least one var matches that type
-            bool hasType = false;
-            if (apply_type_filter) {
-                for (auto v_id : var_ids) {
-                    if (v_id < types.size() && types[v_id] == filter_type) {
-                        hasType = true;
-                        break;
-                    }
-                }
-            }
-            if (apply_type_filter && !hasType) {
-                // skip entire line if it doesn't contain the requested type
-                continue;
-            }
 
             // Reconstruct line by substituting <VAR> placeholders
             std::string reconstructed;
