@@ -2,14 +2,18 @@
 #include <iostream>
 #include <fstream>
 #include "external/json.hpp"
+#include <curl/curl.h>
+
 using json = nlohmann::json;
 
-bool initialize_db(sqlite3*& db, const std::string& db_path) {
-    if (sqlite3_open(db_path.c_str(), &db) != SQLITE_OK) {
+bool initialize_db(sqlite3 *&db, const std::string &db_path)
+{
+    if (sqlite3_open(db_path.c_str(), &db) != SQLITE_OK)
+    {
         std::cerr << "❌ DB Open Error: " << sqlite3_errmsg(db) << "\n";
         return false;
     }
-    const char* schema = R"(
+    const char *schema = R"(
         DROP TABLE IF EXISTS templates;
         DROP TABLE IF EXISTS variables;
         DROP TABLE IF EXISTS files;
@@ -18,8 +22,9 @@ bool initialize_db(sqlite3*& db, const std::string& db_path) {
         CREATE TABLE variables (id INTEGER PRIMARY KEY, value TEXT);
         CREATE TABLE files (id INTEGER PRIMARY KEY, filename TEXT);
     )";
-    char* errMsg = nullptr;
-    if (sqlite3_exec(db, schema, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+    char *errMsg = nullptr;
+    if (sqlite3_exec(db, schema, nullptr, nullptr, &errMsg) != SQLITE_OK)
+    {
         std::cerr << "❌ DB Schema Error: " << errMsg << "\n";
         sqlite3_free(errMsg);
         return false;
@@ -27,10 +32,14 @@ bool initialize_db(sqlite3*& db, const std::string& db_path) {
     return true;
 }
 
-bool store_templates_and_variables(sqlite3* db,
-                                   const std::vector<std::string>& templates,
-                                   const std::vector<std::string>& variables,
-                                   const std::vector<std::string>& files) {
+bool store_templates_and_variables2(sqlite3 *db,
+                                    const std::vector<std::string> &templates,
+                                    const std::vector<std::string> &variables,
+                                    const std::vector<std::string> &files,
+                                    std::unordered_map<std::string, uint32_t> &tpl_map,
+                                    std::unordered_map<std::string, uint32_t> &var_map,
+                                    std::unordered_map<std::string, uint32_t> &file_map)
+{
     const std::string json_path = "variables.json";
     std::cout << "[JSON] Writing to " << json_path << " with "
               << templates.size() << " templates, "
@@ -57,18 +66,57 @@ bool store_templates_and_variables(sqlite3* db,
     return true;
 }
 
-bool load_templates_and_variables(sqlite3* db,
-                                  std::vector<std::string>& templates,
-                                  std::vector<std::string>& variables,
-                                  std::vector<std::string>& files) {
+bool store_templates_and_variables(sqlite3 *db,
+                                   const std::vector<std::string> &templates,
+                                   const std::vector<std::string> &variables,
+                                   const std::vector<std::string> &files,
+                                   std::unordered_map<std::string, uint32_t> &tpl_map,
+                                   std::unordered_map<std::string, uint32_t> &var_map,
+                                   std::unordered_map<std::string, uint32_t> &file_map)
+{
+    using namespace std;
+    ifstream inFile("dictionaries.json");
+    if (!inFile.is_open())
+    {
+        cerr << "Failed to open JSON file." << endl;
+        return 1;
+    }
+
+    json j;
+    inFile >> j;
+
+    for (auto &[key, value] : j["templates"].items())
+    {
+        tpl_map[key] = static_cast<uint32_t>(value.get<int>());
+        // std::cout << "t " << key << ":" << value << endl;
+    }
+
+    for (auto &[key, value] : j["variables"].items())
+    {
+        var_map[key] = static_cast<uint32_t>(value.get<int>());
+        // std::cout << "v " << key << ":" << value << endl;
+    }
+
+    for (auto &[key, value] : j["files"].items())
+    {
+        file_map[key] = static_cast<uint32_t>(value.get<int>());
+        // std::cout << "f " << key << ":" << value << endl;
+    }
+}
+
+bool load_templates_and_variables(sqlite3 *db,
+                                  std::vector<std::string> &templates,
+                                  std::vector<std::string> &variables,
+                                  std::vector<std::string> &files)
+{
     const std::string json_path = "variables.json";
 
-       std::ifstream in(json_path);
-       if (!in)
-       {
-           std::cerr << "❌ Failed to open JSON file: " << json_path << "\n";
-           return false;
-       }
+    std::ifstream in(json_path);
+    if (!in)
+    {
+        std::cerr << "❌ Failed to open JSON file: " << json_path << "\n";
+        return false;
+    }
 
     json j;
     in >> j;

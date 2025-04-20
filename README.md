@@ -26,7 +26,7 @@ An archive created by Logpress consists of:
 ### Using g++ Directly
 
 ```bash
-g++ -std=c++17 -O2 -lz main.cpp compressor.cpp decompressor.cpp searcher.cpp sqlite_helper.cpp -o logpress
+g++ -g -o logpress main.cpp compressor.cpp decompressor.cpp searcher.cpp sqlite_helper.cpp -lz -lsqlite3
 ```
 
 *Adjust the source file names if your project structure differs.*

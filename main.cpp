@@ -39,7 +39,7 @@ int main(int argc, char* argv[]) {
     
     std::string command = argv[1];
     
-    if (command == "compress") {
+    if (command == "compress1") {
         if (argc < 4) {
             std::cerr << "Not enough arguments for compress.\n";
             return 1;
@@ -55,7 +55,32 @@ int main(int argc, char* argv[]) {
             std::cerr << "No files found to compress.\n";
             return 1;
         }
-        if (!compress_files_template_zlib(input_paths, archive_path)) {
+        if (!compress_files_template_zlib2(input_paths, archive_path)) {
+            std::cerr << "Compression failed.\n";
+            return 1;
+        }
+        std::cout << "Compressed into: " << archive_path << "\n";
+    } else if (command == "compress2") {
+        if (argc < 4)
+        {
+            std::cerr << "Not enough arguments for compress.\n";
+            return 1;
+        }
+        std::string archive_path = argv[2];
+        std::vector<std::string> input_paths;
+        // For each provided file_or_directory argument, collect files recursively if needed.
+        for (int i = 3; i < argc; i++)
+        {
+            std::vector<std::string> collected = get_log_files(argv[i]);
+            input_paths.insert(input_paths.end(), collected.begin(), collected.end());
+        }
+        if (input_paths.empty())
+        {
+            std::cerr << "No files found to compress.\n";
+            return 1;
+        }
+        if (!compress_files_template_zlib(input_paths, archive_path))
+        {
             std::cerr << "Compression failed.\n";
             return 1;
         }

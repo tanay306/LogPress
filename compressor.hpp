@@ -13,12 +13,17 @@ enum class VarType {
 // Template + variable extraction result
 struct ParseResult {
     std::string tpl;
+    std::string file;
     std::vector<std::string> vars;
     std::vector<VarType> types;
 };
 
 // Main compression entry point
 bool compress_files_template_zlib(const std::vector<std::string>& input_files,
+                                  const std::string& archive_path,
+                                  size_t lines_per_block = 4096);
+
+bool compress_files_template_zlib2(const std::vector<std::string>& input_files,
                                   const std::string& archive_path,
                                   size_t lines_per_block = 4096);
 

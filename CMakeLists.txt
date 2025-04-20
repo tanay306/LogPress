@@ -23,6 +23,8 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 find_package(ZLIB REQUIRED)
 
+find_package(CURL REQUIRED)
+
 # Sources
 set(SOURCES
     main.cpp
@@ -44,3 +46,6 @@ target_link_libraries(logpress PRIVATE
     ${SQLITE3_LIBRARIES}
     ${ZLIB_LIBRARIES}
 )
+
+target_include_directories(logpress PRIVATE ${CURL_INCLUDE_DIRS})
+target_link_libraries(logpress PRIVATE ${CURL_LIBRARIES})
