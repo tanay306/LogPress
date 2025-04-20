@@ -143,17 +143,18 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
     // Build meta database path: "db/<archive_filename>.meta.db"
     std::filesystem::path archive_p(archive_path);
     std::filesystem::path meta_path = "./db/" + (archive_p.filename().string() + ".meta.db");
-    std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
+    // std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
 
     // SQLite metadata
     sqlite3 *db = nullptr;
-    if (!initialize_db(db, meta_path.string()))
-    {
-        std::cerr << "Failed to init SQLite.\n";
-        return false;
-    }
+    // if (!initialize_db(db, meta_path.string()))
+    // {
+    //     std::cerr << "Failed to init SQLite.\n";
+    //     return false;
+    // }
     store_templates_and_variables(db, templates, variables, files, tpl_map, var_map, file_map);
-    sqlite3_close(db);
+    // sqlite3_close(db);
+
 
     for (auto &pr : prs)
     {
@@ -366,5 +367,6 @@ bool compress_files_template_zlib2(const std::vector<std::string> &input_files,
     //     return false;
     // }
     store_templates_and_variables2(db, templates, variables, files, tpl_map, var_map, file_map);
-    sqlite3_close(db);
+    // sqlite3_close(db);
+    return true;
 }
