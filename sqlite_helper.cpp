@@ -1,5 +1,8 @@
 #include "sqlite_helper.hpp"
 #include <iostream>
+#include <fstream>
+#include "external/json.hpp"
+using json = nlohmann::json;
 
 bool initialize_db(sqlite3*& db, const std::string& db_path) {
     if (sqlite3_open(db_path.c_str(), &db) != SQLITE_OK) {
@@ -28,57 +31,29 @@ bool store_templates_and_variables(sqlite3* db,
                                    const std::vector<std::string>& templates,
                                    const std::vector<std::string>& variables,
                                    const std::vector<std::string>& files) {
-    std::cout << "[SQLITE] Inserting "
+    const std::string json_path = "variables.json";
+    std::cout << "[JSON] Writing to " << json_path << " with "
               << templates.size() << " templates, "
               << variables.size() << " variables, "
               << files.size() << " files\n";
 
-    sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
-    sqlite3_exec(db, "DELETE FROM templates;", nullptr, nullptr, nullptr);
-    sqlite3_exec(db, "DELETE FROM variables;", nullptr, nullptr, nullptr);
-    sqlite3_exec(db, "DELETE FROM files;", nullptr, nullptr, nullptr);
+    json j;
 
-    sqlite3_stmt* stmt;
+    j["templates"] = templates;
+    j["variables"] = variables;
+    j["files"] = files;
 
-    // Insert templates
-    sqlite3_prepare_v2(db, "INSERT INTO templates (id, template) VALUES (?, ?);", -1, &stmt, nullptr);
-    for (size_t i = 0; i < templates.size(); ++i) {
-        sqlite3_bind_int(stmt, 1, i);
-        sqlite3_bind_text(stmt, 2, templates[i].c_str(), -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(stmt) != SQLITE_DONE) {
-            std::cerr << "❌ Insert template failed: " << sqlite3_errmsg(db) << "\n";
-        }
-        sqlite3_reset(stmt);
+    std::ofstream out(json_path);
+    if (!out)
+    {
+        std::cerr << "❌ Failed to open JSON file for writing: " << json_path << "\n";
+        return false;
     }
-    sqlite3_finalize(stmt);
 
-    // Insert variables
-    sqlite3_prepare_v2(db, "INSERT INTO variables (id, value) VALUES (?, ?);", -1, &stmt, nullptr);
-    for (size_t i = 0; i < variables.size(); ++i) {
-        sqlite3_bind_int(stmt, 1, i);
-        sqlite3_bind_text(stmt, 2, variables[i].c_str(), -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(stmt) != SQLITE_DONE) {
-            std::cerr << "❌ Insert variable failed: " << sqlite3_errmsg(db) << "\n";
-        }
-        sqlite3_reset(stmt);
-    }
-    sqlite3_finalize(stmt);
+    out << j.dump(2); // pretty-print with 2-space indentation
+    out.close();
 
-    // Insert files
-    sqlite3_prepare_v2(db, "INSERT INTO files (id, filename) VALUES (?, ?);", -1, &stmt, nullptr);
-    for (size_t i = 0; i < files.size(); ++i) {
-        sqlite3_bind_int(stmt, 1, i);
-        sqlite3_bind_text(stmt, 2, files[i].c_str(), -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(stmt) != SQLITE_DONE) {
-            std::cerr << "❌ Insert file failed: " << sqlite3_errmsg(db) << "\n";
-        }
-        sqlite3_reset(stmt);
-    }
-    sqlite3_finalize(stmt);
-
-    sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
-
-    std::cout << "[SQLITE] Done writing meta.db ✅\n";
+    std::cout << "[JSON] Done writing to " << json_path << " ✅\n";
     return true;
 }
 
@@ -86,27 +61,31 @@ bool load_templates_and_variables(sqlite3* db,
                                   std::vector<std::string>& templates,
                                   std::vector<std::string>& variables,
                                   std::vector<std::string>& files) {
-    sqlite3_stmt* stmt;
+    const std::string json_path = "variables.json";
 
-    sqlite3_prepare_v2(db, "SELECT template FROM templates ORDER BY id;", -1, &stmt, nullptr);
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        templates.push_back(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+       std::ifstream in(json_path);
+       if (!in)
+       {
+           std::cerr << "❌ Failed to open JSON file: " << json_path << "\n";
+           return false;
+       }
+
+    json j;
+    in >> j;
+
+    try
+    {
+        templates = j.at("templates").get<std::vector<std::string>>();
+        variables = j.at("variables").get<std::vector<std::string>>();
+        files = j.at("files").get<std::vector<std::string>>();
     }
-    sqlite3_finalize(stmt);
-
-    sqlite3_prepare_v2(db, "SELECT value FROM variables ORDER BY id;", -1, &stmt, nullptr);
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        variables.push_back(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+    catch (const std::exception &e)
+    {
+        std::cerr << "❌ Failed to parse JSON: " << e.what() << "\n";
+        return false;
     }
-    sqlite3_finalize(stmt);
 
-    sqlite3_prepare_v2(db, "SELECT filename FROM files ORDER BY id;", -1, &stmt, nullptr);
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        files.push_back(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
-    }
-    sqlite3_finalize(stmt);
-
-    std::cout << "[SQLITE] Loaded " << templates.size() << " templates, "
+    std::cout << "[JSON] Loaded " << templates.size() << " templates, "
               << variables.size() << " variables, "
               << files.size() << " files ✅\n";
 

@@ -191,6 +191,8 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
             // cursor is updated in ecoded_line_to_string function.
         }
 
+        blk_idx++;
+
         std::vector<char> comp;
         if (!zlib_compress_block(blk, comp, dict)) {
             std::cerr << "Block compression failed.\n";
