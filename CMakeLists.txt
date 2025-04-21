@@ -1,4 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
+
+# Let CMake detect the SDK path automatically
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment version")
+
 project(logpress LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -9,11 +13,22 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# macOS: Homebrew keg-only support for sqlite
-if(APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-    message(STATUS "Using Homebrew keg-only SQLite for macOS ARM64")
-    set(CMAKE_PREFIX_PATH "/opt/homebrew/opt/sqlite")
-    set(ENV{PKG_CONFIG_PATH} "/opt/homebrew/opt/sqlite/lib/pkgconfig")
+# Explicitly select the Xcode toolchain if needed
+if(APPLE)
+    # Get the SDK path automatically
+    execute_process(
+        COMMAND xcrun --show-sdk-path
+        OUTPUT_VARIABLE CMAKE_OSX_SYSROOT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    message(STATUS "Using macOS SDK: ${CMAKE_OSX_SYSROOT}")
+    
+    # macOS: Homebrew keg-only support for sqlite
+    if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+        message(STATUS "Using Homebrew keg-only SQLite for macOS ARM64")
+        set(CMAKE_PREFIX_PATH "/opt/homebrew/opt/sqlite")
+        set(ENV{PKG_CONFIG_PATH} "/opt/homebrew/opt/sqlite/lib/pkgconfig")
+    endif()
 endif()
 
 # Enable pkg-config

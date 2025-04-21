@@ -11,6 +11,11 @@
 #include <zlib.h>
 #include <chrono>   // for timing
 #include <cstdint>  // for uint32_t
+#include <thread>   // for multithreading
+#include <mutex>    // for synchronization
+#include <future>   // for async processing
+#include <queue>    // for processing queue
+#include <condition_variable> // for thread coordination
 
 // Utility to read 4 bytes as uint32_t from file
 static uint32_t read_u32(std::ifstream& in) {
@@ -123,11 +128,16 @@ static std::string highlightAllSegments(std::string line,
     return line;
 }
 
+// Structure to store search results while preserving order
+struct BlockSearchResult {
+    int block_id;
+    std::vector<std::string> matched_lines;
+    size_t lines_processed;
+};
 
 bool search_archive_template_zlib(const std::string& archive_path,
                                   const std::string& search_term) 
 {
-
     using clock = std::chrono::steady_clock;
 
     auto search_start_time = clock::now();
@@ -153,7 +163,6 @@ bool search_archive_template_zlib(const std::string& archive_path,
     sqlite3* db = nullptr;
     std::vector<std::string> templates, variables, filenames;
 
-    // std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
     std::filesystem::path archive_p(archive_path);
     std::filesystem::path meta_path = "./db/" + (archive_p.filename().string() + ".meta.db");
     std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
@@ -202,52 +211,33 @@ bool search_archive_template_zlib(const std::string& archive_path,
         }
     }
 
-    size_t match_count     = 0;
-    size_t lines_scanned = 0;
-
     std::vector<std::string> literalSegments;
     if (use_regex) {
         literalSegments = extractLiteralSegments(search_term);
     }
 
-    // 5) Read blocks until EOF
-    int block_index = 0;
-    while (in.peek() != EOF) {
-        // lines in block, uncompressed size, compressed size
-        if (!in.good()) break; // safety
-        uint32_t lines  = read_u32(in);
-        if (!in.good()) break;
-        uint32_t uncomp = read_u32(in);
-        if (!in.good()) break;
-        uint32_t comp   = read_u32(in);
-        if (!in.good()) break;
-
-        // read compressed data
-        std::vector<char> comp_buf(comp);
-        in.read(comp_buf.data(), comp);
-        if (in.gcount() < (std::streamsize)comp) {
-            std::cerr << "❌ Truncated block data.\n";
-            return false;
-        }
-
+    // Create worker function that processes a single block
+    auto process_block = [&](int block_index, const std::vector<char>& comp_buf, 
+                           uint32_t lines, uint32_t uncomp) -> BlockSearchResult {
+        BlockSearchResult result;
+        result.block_id = block_index;
+        result.lines_processed = lines;
+        
         // Decompress block
         std::vector<char> block;
         if (!zlib_decompress_block(comp_buf, uncomp, block, dict)) {
             std::cerr << "❌ Decompression failed (block#" << block_index << ").\n";
-            return false;
+            return result;
         }
-        block_index++;
 
-        // parse lines
+        // Parse lines
         const char* p = block.data();
         size_t block_size = block.size();
         for (uint32_t line_idx = 0; line_idx < lines; line_idx++) {
-            lines_scanned++;
             if ((p + 12) > (block.data() + block_size)) {
-                // not enough data to read tpl_id + var_count + ...
                 std::cerr << "❌ Block data truncated reading line#" 
-                          << line_idx << " of block#" << (block_index - 1) << "\n";
-                return false;
+                          << line_idx << " of block#" << block_index << "\n";
+                return result;
             }
 
             uint32_t file_id   = read_u32_mem(p); // SHIFT
@@ -259,7 +249,7 @@ bool search_archive_template_zlib(const std::string& archive_path,
             for (uint32_t j = 0; j < var_count; j++) {
                 if ((p + 4) > (block.data() + block_size)) {
                     std::cerr << "❌ Block data truncated while reading var_ids.\n";
-                    return false;
+                    return result;
                 }
                 var_ids[j] = read_u32_mem(p);
             }
@@ -311,7 +301,6 @@ bool search_archive_template_zlib(const std::string& archive_path,
                     if (match) {
                         reconstructed = highlightAllSegments(reconstructed, literalSegments);
                     }
-
                 }
             } else {
                 // literal substring search => also highlight
@@ -323,24 +312,115 @@ bool search_archive_template_zlib(const std::string& archive_path,
                 }
             }
 
-            // if matched => print
+            // if matched => store
             if (match) {
-                if (!found_first_match) {
-                    found_first_match = true;
-                    first_match_time  = clock::now();
-                }
-                std::cout << reconstructed << "\n";
-                match_count++;
-
+                result.matched_lines.push_back(reconstructed);
             }
+        }
+        return result;
+    };
+
+    // Determine thread count (hardware_concurrency with a reasonable min/max)
+    unsigned int thread_count = std::thread::hardware_concurrency();
+    if (thread_count == 0) thread_count = 4;  // Default if detection fails
+    // Limit max threads to avoid system overload
+    thread_count = std::min(thread_count, 16u); 
+
+    std::cout << "🧵 Using " << thread_count << " threads for search\n";
+
+    // Create thread pool
+    std::vector<std::future<BlockSearchResult>> futures;
+    
+    // Read blocks and submit tasks
+    int block_index = 0;
+    std::vector<BlockSearchResult> ordered_results;
+    size_t total_lines_scanned = 0;
+    size_t total_matches = 0;
+    
+    // Keep a limited number of active tasks to manage memory usage
+    const size_t max_active_tasks = thread_count * 2;
+    
+    while (in.peek() != EOF) {
+        // Read block header
+        if (!in.good()) break; // safety
+        uint32_t lines = read_u32(in);
+        if (!in.good()) break;
+        uint32_t uncomp = read_u32(in);
+        if (!in.good()) break;
+        uint32_t comp = read_u32(in);
+        if (!in.good()) break;
+
+        // Read compressed data
+        std::vector<char> comp_buf(comp);
+        in.read(comp_buf.data(), comp);
+        if (in.gcount() < (std::streamsize)comp) {
+            std::cerr << "❌ Truncated block data.\n";
+            return false;
+        }
+        
+        // Limit active tasks to avoid excessive memory usage
+        if (futures.size() >= max_active_tasks) {
+            // Wait for the earliest submitted task to complete
+            auto result = futures.front().get();
+            futures.erase(futures.begin());
+            
+            // Process result
+            total_lines_scanned += result.lines_processed;
+            total_matches += result.matched_lines.size();
+            
+            // Store for ordered output
+            ordered_results.push_back(std::move(result));
+            
+            // Track first match time
+            if (!found_first_match && !ordered_results.back().matched_lines.empty()) {
+                found_first_match = true;
+                first_match_time = clock::now();
+            }
+        }
+        
+        // Submit new task
+        futures.push_back(
+            std::async(std::launch::async, 
+                      process_block, 
+                      block_index++, 
+                      comp_buf, 
+                      lines, 
+                      uncomp)
+        );
+    }
+    
+    // Wait for remaining tasks to complete
+    for (auto& future : futures) {
+        auto result = future.get();
+        total_lines_scanned += result.lines_processed;
+        total_matches += result.matched_lines.size();
+        ordered_results.push_back(std::move(result));
+        
+        // Track first match time
+        if (!found_first_match && !ordered_results.back().matched_lines.empty()) {
+            found_first_match = true;
+            first_match_time = clock::now();
+        }
+    }
+    
+    // Sort results by block_id to maintain original order
+    std::sort(ordered_results.begin(), ordered_results.end(), 
+              [](const BlockSearchResult& a, const BlockSearchResult& b) {
+                  return a.block_id < b.block_id;
+              });
+    
+    // Output matched lines in order
+    for (const auto& result : ordered_results) {
+        for (const auto& line : result.matched_lines) {
+            std::cout << line << "\n";
         }
     }
 
-    // done
+    // Print statistics
     auto end_time = clock::now();
     double total_sec = std::chrono::duration<double>(end_time - search_start_time).count();
-    std::cout << "\nScanned " << block_index << " blocks, " << lines_scanned << " lines.\n";
-    std::cout << "Found " << match_count << " matches.\n";
+    std::cout << "\nScanned " << block_index << " blocks, " << total_lines_scanned << " lines.\n";
+    std::cout << "Found " << total_matches << " matches.\n";
 
     if (found_first_match) {
         double first_match_sec = std::chrono::duration<double>(first_match_time - search_start_time).count();
