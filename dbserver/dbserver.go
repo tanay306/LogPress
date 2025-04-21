@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -61,12 +62,36 @@ func main() {
 
 		if err := tx.Commit(); err != nil {
 			http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+			println("Failed to commit transaction: %s", err.Error())
+			return
+		}
+
+		err = getDictionary(db, idMap)
+		if err != nil {
+			http.Error(w, "Failed to get dictionary", http.StatusInternalServerError)
+			println("Failed to get dictionary: %s", err.Error())
 			return
 		}
 
 		response, err := json.Marshal(idMap)
 		if err != nil {
 			http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+			println("Failed to marshal response: %s", err.Error())
+			return
+		}
+
+		f, err := os.Create("idmap_response.json")
+		if err != nil {
+			println("Failed to create idmap response file: %s", err.Error())
+			http.Error(w, "Failed to create file", http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+
+		// 2. Write the JSON bytes to the file
+		if _, err := f.Write(response); err != nil {
+			println("Failed to  write response to file: %s", err.Error())
+			http.Error(w, "Failed to write response to file"+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -96,11 +121,49 @@ func createTables(db *sql.DB) {
 	}
 }
 
+func getDictionary(db *sql.DB, idMap map[string]map[string]int64) error {
+	// define for each table which text column to pull
+	tables := map[string]string{
+		"templates": "template",
+		"variables": "value",
+		"files":     "filename",
+	}
+
+	for tbl, col := range tables {
+		// init the inner map for this table
+		idMap[tbl] = make(map[string]int64)
+
+		// query id + text-column
+		query := fmt.Sprintf("SELECT id, %s FROM %s;", col, tbl)
+		rows, err := db.Query(query)
+		if err != nil {
+			return fmt.Errorf("query %s: %w", tbl, err)
+		}
+		defer rows.Close()
+
+		// scan into the map
+		for rows.Next() {
+			var (
+				id  int64
+				val string
+			)
+			if err := rows.Scan(&id, &val); err != nil {
+				return fmt.Errorf("scan %s: %w", tbl, err)
+			}
+			idMap[tbl][val] = id
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("rows %s: %w", tbl, err)
+		}
+	}
+	return nil
+}
+
 func insertMany(tx *sql.Tx, table string, items []string, idMap map[string]map[string]int64) error {
 	// Initialize the map for the specific table if it doesn't exist
-	if _, exists := idMap[table]; !exists {
-		idMap[table] = make(map[string]int64)
-	}
+	// if _, exists := idMap[table]; !exists {
+	// 	idMap[table] = make(map[string]int64)
+	// }
 
 	// Prepare the statement
 	stmt, err := tx.Prepare(fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES (?);", table, columnName(table)))
@@ -112,21 +175,21 @@ func insertMany(tx *sql.Tx, table string, items []string, idMap map[string]map[s
 
 	for _, item := range items {
 		// Execute the insert statement
-		result, err := stmt.Exec(item)
+		_, err := stmt.Exec(item)
 		if err != nil {
 			log.Fatalf("Insert failed for table %s: %v", table, err)
 			return err
 		}
 
 		// Get the ID of the inserted row
-		lastInsertID, err := result.LastInsertId()
-		if err != nil {
-			log.Fatalf("Failed to get last insert ID: %v", err)
-			return err
-		}
+		// lastInsertID, err := result.LastInsertId()
+		// if err != nil {
+		// 	log.Fatalf("Failed to get last insert ID: %v", err)
+		// 	return err
+		// }
 
 		// Save the value and corresponding row ID in the map for the table
-		idMap[table][item] = lastInsertID
+		// idMap[table][item] = lastInsertID
 	}
 
 	return nil

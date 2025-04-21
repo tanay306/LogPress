@@ -123,6 +123,7 @@ func main() {
 			println("Error writing file")
 			return
 		}
+		println("wrote file:", filename)
 
 		wg.Done()
 
@@ -200,25 +201,25 @@ func main() {
 		cmd2.Stderr = os.Stderr
 
 		if err := cmd2.Run(); err != nil {
-			println("err", err.Error())
+			println("Err in cmd2:", err.Error())
 			w.WriteHeader(500)
 			return
 		}
 
-		dirPath := "chunks" + port
-		files, err := os.ReadDir(dirPath)
-		if err != nil {
-			log.Fatalf("Error reading directory: %v", err)
-		}
+		// dirPath := "chunks" + port
+		// files, err := os.ReadDir(dirPath)
+		// if err != nil {
+		// 	log.Fatalf("Error reading directory: %v", err)
+		// }
 
-		for _, file := range files {
-			if !file.IsDir() {
-				err := os.RemoveAll(dirPath + "/" + file.Name())
-				if err != nil {
-					log.Fatalf("Error deleting file %s: %v", file.Name(), err)
-				}
-			}
-		}
+		// for _, file := range files {
+		// 	if !file.IsDir() {
+		// 		err := os.RemoveAll(dirPath + "/" + file.Name())
+		// 		if err != nil {
+		// 			log.Fatalf("Error deleting file %s: %v", file.Name(), err)
+		// 		}
+		// 	}
+		// }
 
 		w.WriteHeader(http.StatusOK)
 	})

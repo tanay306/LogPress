@@ -67,12 +67,9 @@ bool store_templates_and_variables2(sqlite3 *db,
 }
 
 bool store_templates_and_variables(sqlite3 *db,
-                                   const std::vector<std::string> &templates,
-                                   const std::vector<std::string> &variables,
-                                   const std::vector<std::string> &files,
-                                   std::unordered_map<std::string, uint32_t> &tpl_map,
-                                   std::unordered_map<std::string, uint32_t> &var_map,
-                                   std::unordered_map<std::string, uint32_t> &file_map)
+                                   std::map<std::string, uint32_t> &tpl_map,
+                                   std::map<std::string, uint32_t> &var_map,
+                                   std::map<std::string, uint32_t> &file_map)
 {
     using namespace std;
     ifstream inFile("dictionaries.json");
@@ -107,9 +104,12 @@ bool store_templates_and_variables(sqlite3 *db,
 bool load_templates_and_variables(sqlite3 *db,
                                   std::vector<std::string> &templates,
                                   std::vector<std::string> &variables,
-                                  std::vector<std::string> &files)
+                                  std::vector<std::string> &files,
+                                  std::unordered_map<uint32_t, std::string> &tpl_map,
+                                  std::unordered_map<uint32_t, std::string> &var_map,
+                                  std::unordered_map<uint32_t, std::string> &file_map)
 {
-    const std::string json_path = "variables.json";
+    const std::string json_path = "dictionaries.json";
 
     std::ifstream in(json_path);
     if (!in)
@@ -123,9 +123,63 @@ bool load_templates_and_variables(sqlite3 *db,
 
     try
     {
-        templates = j.at("templates").get<std::vector<std::string>>();
-        variables = j.at("variables").get<std::vector<std::string>>();
-        files = j.at("files").get<std::vector<std::string>>();
+        // -- templates --
+        templates.clear();
+        tpl_map.clear();
+        if (j.contains("templates"))
+        {
+            for (auto &el : j["templates"].items())
+            {
+                const auto &name = el.key();
+                uint32_t id = el.value().get<uint32_t>();
+                templates.push_back(name);
+                tpl_map[id] = name;
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "❌ Failed to parse JSON: " << e.what() << "\n";
+        return false;
+    }
+
+    try
+    {
+        // -- variables --
+        variables.clear();
+        var_map.clear();
+        if (j.contains("variables"))
+        {
+            for (auto &el : j["variables"].items())
+            {
+                const auto &value = el.key();
+                uint32_t id = el.value().get<uint32_t>();
+                variables.push_back(value);
+                var_map[id] = value;
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "❌ Failed to parse JSON: " << e.what() << "\n";
+        return false;
+    }
+
+    try
+    {
+        // -- files --
+        files.clear();
+        file_map.clear();
+        if (j.contains("files"))
+        {
+            for (auto &el : j["files"].items())
+            {
+                const auto &fname = el.key();
+                uint32_t id = el.value().get<uint32_t>();
+                files.push_back(fname);
+                file_map[id] = fname;
+            }
+        }
     }
     catch (const std::exception &e)
     {

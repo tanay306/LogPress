@@ -152,6 +152,8 @@ bool search_archive_template_zlib(const std::string& archive_path,
     // 3) Load metadata from .meta.db (templates, variables, types, filenames)
     sqlite3* db = nullptr;
     std::vector<std::string> templates, variables, filenames;
+    std::unordered_map< uint32_t,std::string> tpl_map, var_map, file_map;
+
 
     // std::filesystem::path meta_path = std::filesystem::absolute(archive_path + ".meta.db");
     std::filesystem::path archive_p(archive_path);
@@ -162,7 +164,7 @@ bool search_archive_template_zlib(const std::string& archive_path,
         std::cerr << "❌ Failed to open meta.db at: " << meta_path << "\n";
         return false;
     }
-    if (!load_templates_and_variables(db, templates, variables, filenames)) {
+    if (!load_templates_and_variables(db, templates, variables, filenames, tpl_map, var_map, file_map)) {
         std::cerr << "❌ Failed to load from meta.db\n";
         sqlite3_close(db);
         return false;

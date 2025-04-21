@@ -7,8 +7,12 @@
 #include <filesystem>
 #include <regex>
 #include <unordered_map>
+#include <map>
 #include <zlib.h>
 #include <cstring>
+#include <map>
+#include <string>
+#include <vector>
 
 #include <iomanip>
 #include <unordered_set>
@@ -88,11 +92,35 @@ bool zlib_compress_block(const std::vector<char> &in, std::vector<char> &out, co
     return true;
 }
 
+void compress_blk_to_comp(const std::vector<char> &blk,
+                          std::vector<char> &comp,
+                          int level = Z_BEST_COMPRESSION)
+{
+    uLong srcLen = static_cast<uLong>(blk.size());
+    uLong bound = compressBound(srcLen); // worst‑case size
+    comp.resize(bound);
+
+    int ret = compress2(
+        reinterpret_cast<Bytef *>(comp.data()),      // dest
+        &bound,                                      // in/out: compressed size
+        reinterpret_cast<const Bytef *>(blk.data()), // source
+        srcLen,                                      // source size
+        level                                        // compression level
+    );
+
+    if (ret != Z_OK)
+    {
+        throw std::runtime_error("zlib compress2 failed: " + std::to_string(ret));
+    }
+
+    comp.resize(bound); // trim to actual compressed size
+}
+
 bool compress_files_template_zlib(const std::vector<std::string> &input_files,
                                   const std::string &archive_path,
                                   size_t lines_per_block)
 {
-    std::unordered_map<std::string, uint32_t> tpl_map, var_map, file_map;
+    std::map<std::string, uint32_t> tpl_map, var_map, file_map;
     std::vector<std::string> templates, variables, files;
     std::vector<char> current_block;
     std::vector<std::vector<char>> blocks;
@@ -136,6 +164,7 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
             }
 
             prs.push_back(pr);
+            total_lines++;
         }
     }
 
@@ -143,7 +172,7 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
     // Build meta database path: "db/<archive_filename>.meta.db"
     std::filesystem::path archive_p(archive_path);
     std::filesystem::path meta_path = "./db/" + (archive_p.filename().string() + ".meta.db");
-    // std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
+    std::cout << "Done parsing templates for all files" << std::endl;
 
     // SQLite metadata
     sqlite3 *db = nullptr;
@@ -152,9 +181,10 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
     //     std::cerr << "Failed to init SQLite.\n";
     //     return false;
     // }
-    store_templates_and_variables(db, templates, variables, files, tpl_map, var_map, file_map);
+    store_templates_and_variables(db, tpl_map, var_map, file_map);
     // sqlite3_close(db);
 
+    std::cout << "Done parsing dictionaries.json" << std::endl;
 
     for (auto &pr : prs)
     {
@@ -171,32 +201,24 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
             uint32_t var_id = var_map[v];
             write_u32(current_block, var_id);
         }
-
-        total_lines++;
-        if (total_lines % lines_per_block == 0)
-        {
-            blocks.push_back(std::move(current_block));
-            current_block.clear();
-        }
     }
 
-    if (!current_block.empty())
-    {
-        blocks.push_back(std::move(current_block));
-    }
+    std::cout << "Done writing to block" << std::endl;
 
-    // Build dictionary
+    // // Build dictionary
     std::string dict;
-    for (const auto &s : templates)
-        dict += s;
-    for (const auto &v : variables)
-        dict += v;
-    for (const auto &f : files)
-        dict += f;
+    for (const auto &s : tpl_map)
+        dict += s.first;
+    for (const auto &v : var_map)
+        dict += v.first;
+    for (const auto &f : file_map)
+        dict += f.first;
 
     std::ofstream debug_dict("compression.dict");
     debug_dict << dict;
     debug_dict.close();
+
+    std::cout << "Done writing compression.dict" << std::endl;
 
     std::ofstream out(archive_path, std::ios::binary);
     if (!out)
@@ -207,73 +229,80 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
     out.write("TCDZ", 4);
 
     // Create directory & one stream per source file
-    std::filesystem::create_directories("./debug_by_file");
-    std::vector<std::ofstream> dbg_streams(files.size());
-    for (size_t fid = 0; fid < files.size(); ++fid)
-    {
-        std::filesystem::path p = "./debug_by_file/";
-        p /= std::filesystem::path(files[fid]).filename();
-        p += ".encoded.txt";
-        dbg_streams[fid].open(p);
-    }
+    // std::filesystem::create_directories("./debug_by_file");
+    // std::vector<std::ofstream> dbg_streams(files.size());
+    // for (size_t fid = 0; fid < files.size(); ++fid)
+    // {
+    //     std::filesystem::path p = "./debug_by_file/";
+    //     p /= std::filesystem::path(files[fid]).filename();
+    //     p += ".encoded.txt";
+    //     dbg_streams[fid].open(p);
+    // }
 
-    size_t blk_idx = 0;
-    for (auto &blk : blocks)
-    {
-        const char *cursor = blk.data();
-        const char *end = blk.data() + blk.size();
+    // std::ofstream debug_file("parsed_compress.txt");
 
-        // Optional header line once per file per block (tracks which streams we touched)
-        std::unordered_set<uint32_t> touched;
+    // std::cout << "Done creating all outstreams" << std::endl;
 
-        while (cursor < end)
-        {
-            const char *line_start = cursor; // save start to peek file_id
-            uint32_t file_id;
-            std::memcpy(&file_id, cursor, 4);
+    // size_t blk_idx = 0;
+    auto &blk = current_block;
+    // // for (auto &blk : blocks)
+    // // {
+    // const char *cursor = blk.data();
+    // const char *end = blk.data() + blk.size();
 
-            // Print header "=== block N ===" only the first time this file appears in this block
-            if (!touched.count(file_id))
-            {
-                dbg_streams[file_id] << "\n=== block " << blk_idx << " ===\n";
-                touched.insert(file_id);
-            }
+    // Optional header line once per file per block (tracks which streams we touched)
+    // std::unordered_set<uint32_t> touched;
 
-            // Actually format & append the line
-            dbg_streams[file_id] << encoded_line_to_string(cursor);
-            // cursor is updated in ecoded_line_to_string function.
-        }
+    // while (cursor < end)
+    // {
+    //     const char *line_start = cursor; // save start to peek file_id
+    //     uint32_t file_id;
+    //     std::memcpy(&file_id, cursor, 4);
 
-        blk_idx++;
+    //     // Print header "=== block N ===" only the first time this file appears in this block
+    //     if (!touched.count(file_id))
+    //     {
+    //         // dbg_streams[file_id] << "\n=== block   ===\n";
+    //         touched.insert(file_id);
+    //     }
 
-        std::vector<char> comp;
-        if (!zlib_compress_block(blk, comp, dict))
-        {
-            std::cerr << "Block compression failed.\n";
-            return false;
-        }
+    //     // Actually format & append the line
+    //     auto str = encoded_line_to_string(cursor);
+    //     // dbg_streams[file_id] << str;
+    //     debug_file << str;
+    //     // cursor is updated in ecoded_line_to_string function.
+    // }
 
-        size_t lines = 0, i = 0;
-        while (i < blk.size())
-        {
-            lines++;
-            uint32_t var_offset = i + 8; // file_id (4) + tpl_id (4)
-            uint32_t var_count;
-            std::memcpy(&var_count, &blk[var_offset], 4);
-            i = var_offset + 4 + var_count * 4;
-        }
+    // debug_file.close();
 
-        uint32_t lines_val = static_cast<uint32_t>(lines);
-        uint32_t blk_size = static_cast<uint32_t>(blk.size());
-        uint32_t comp_size = static_cast<uint32_t>(comp.size());
-        archive_size_no_zlib += 12 + blk_size;    // header + raw block
-        archive_size_with_zlib += 12 + comp_size; // header + compressed block
+    // // blk_idx++;
 
-        out.write(reinterpret_cast<const char *>(&lines_val), 4);
-        out.write(reinterpret_cast<const char *>(&blk_size), 4);
-        out.write(reinterpret_cast<const char *>(&comp_size), 4);
-        out.write(comp.data(), comp.size());
-    }
+    std::cout << "Done writing parsed block" << std::endl;
+
+    std::vector<char> comp;
+    compress_blk_to_comp(blk, comp);
+    // if (!zlib_compress_block(blk, comp, dict))
+    // {
+    //     std::cerr << "Block compression failed.\n";
+    //     return false;
+    // }
+
+    std::cout << "zlib part done for blkid" << std::endl;
+
+    uint32_t lines_val = static_cast<uint32_t>(total_lines);
+    uint32_t blk_size = static_cast<uint32_t>(blk.size());
+    uint32_t comp_size = static_cast<uint32_t>(comp.size());
+    archive_size_no_zlib += 12 + blk_size;    // header + raw block
+    archive_size_with_zlib += 12 + comp_size; // header + compressed block
+
+    std::cout << lines_val << ":" << blk_size << ":" << comp_size << std::endl;
+    out.write(reinterpret_cast<const char *>(&lines_val), 4);
+    out.write(reinterpret_cast<const char *>(&blk_size), 4);
+    out.write(reinterpret_cast<const char *>(&comp_size), 4);
+    out.write(comp.data(), comp.size());
+
+    std::cout << "writing to out part done:" << std::endl;
+    // }
     // std::cout << "[DEBUG] Final: variables.size()=" << variables.size();
 
     std::cout << "📦 Compressed " << total_lines << " lines in " << blocks.size() << " blocks.\n";

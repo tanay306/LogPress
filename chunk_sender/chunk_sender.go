@@ -117,7 +117,8 @@ func main() {
 		// Handle remaining lines
 		if len(chunk) > 0 {
 			data := strings.Join(chunk, "\n")
-			target := workers[workerIndex%len(workers)]
+			target := workers[workerIndex%len(workers)] + "/receive-chunk"
+
 			currentSeq := sequence
 
 			println("last sequence", currentSeq)
@@ -131,11 +132,11 @@ func main() {
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
-				// log.Printf("Error sending final chunk: %v", err)
+				log.Printf("Error sending final chunk: %v", err)
 			} else {
 				defer resp.Body.Close()
 				if resp.StatusCode != http.StatusOK {
-					// log.Printf("Non-OK final response: %d", resp.StatusCode)
+					log.Printf("Non-OK final response: %d", resp.StatusCode)
 				}
 			}
 			sequence++
@@ -338,7 +339,7 @@ func main() {
 			fmt.Printf("Writing %s.txt:\n", base)
 
 			for _, part := range parts {
-				fmt.Println("  -", part.path)
+				// fmt.Println("  -", part.path)
 				inFile, err := os.Open(part.path)
 				if err != nil {
 					log.Printf("Failed to open %s: %v\n", part.path, err)
