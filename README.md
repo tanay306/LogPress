@@ -38,17 +38,30 @@ g++ -std=c++17 -O2 -lz main.cpp compressor.cpp decompressor.cpp searcher.cpp sql
    ```bash
    cmake -S . -B build
    ```
+   OR
+  ```bash
+   cd build
+   cmake ..
+   ```
 
 2. **Build the Project:**
 
    ```bash
    cmake --build build
    ```
+   If you are in build directory do:
+   ```bash
+   cmake --build .
+   ```
 
 3. **Run the Executable:**
 
    ```bash
    ./build/logpress
+   ```
+   If you are in build directory do:
+   ```bash
+   ./logpress
    ```
 
 ## Usage 📖
@@ -66,10 +79,10 @@ Compress one or more log files into a single archive.
 **Example:**
 
 ```bash
-./logpress compress archive.tmzl log1.txt log2.txt
+./logpress compress archive.lgp log1.txt log2.txt
 ```
 
-> This reads `log1.txt` and `log2.txt`, compresses them using a template-based approach combined with zlib compression, and produces an archive called `archive.tmzl`.
+> This reads `log1.txt` and `log2.txt`, compresses them using a template-based approach combined with zlib compression, and produces an archive called `archive.lgp`.
 
 ### 2. Decompressing an Archive
 
@@ -82,10 +95,10 @@ Reconstruct the original log files from an archive into a specified output folde
 **Example:**
 
 ```bash
-./logpress decompress archive.tmzl output_logs
+./logpress decompress archive.lgp output_logs
 ```
 
-> This extracts the compressed data from `archive.tmzl` and writes the reconstructed logs into the `output_logs` directory.
+> This extracts the compressed data from `archive.lgp` and writes the reconstructed logs into the `output_logs` directory.
 
 ### 3. Searching Within an Archive
 
@@ -98,7 +111,7 @@ Search for log lines matching a specific term within an archive without needing 
 **Example:**
 
 ```bash
-./logpress search archive.tmzl "ERROR"
+./logpress search archive.lgp "ERROR"
 ```
 
 > This command searches the archive for any log lines containing the term `"ERROR"` and prints the matching lines along with their corresponding filenames.
