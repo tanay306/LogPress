@@ -206,20 +206,22 @@ func main() {
 			return
 		}
 
-		// dirPath := "chunks" + port
-		// files, err := os.ReadDir(dirPath)
-		// if err != nil {
-		// 	log.Fatalf("Error reading directory: %v", err)
-		// }
+		dirPath := "chunks" + port
+		files, err := os.ReadDir(dirPath)
+		if err != nil {
+			log.Fatalf("Error reading directory: %v", err)
+		}
 
-		// for _, file := range files {
-		// 	if !file.IsDir() {
-		// 		err := os.RemoveAll(dirPath + "/" + file.Name())
-		// 		if err != nil {
-		// 			log.Fatalf("Error deleting file %s: %v", file.Name(), err)
-		// 		}
-		// 	}
-		// }
+		for _, file := range files {
+			if !file.IsDir() {
+				err := os.RemoveAll(dirPath + "/" + file.Name())
+				if err != nil {
+					log.Fatalf("Error deleting file %s: %v", file.Name(), err)
+				}
+			} else {
+				os.RemoveAll(dirPath + "/" + file.Name())
+			}
+		}
 
 		w.WriteHeader(http.StatusOK)
 	})
@@ -238,6 +240,7 @@ func main() {
 		outputDir := "output" + port
 		sendOutputFiles(w, outputDir)
 		// w.WriteHeader(http.StatusOK)
+		os.RemoveAll(outputDir)
 	})
 
 	http.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +285,22 @@ func main() {
 			}
 		}
 		cleanOutput := strings.Join(cleaned, "\n")
+
+		// files, err := os.ReadDir(dirPath)
+		// if err != nil {
+		// 	log.Fatalf("Error reading directory: %v", err)
+		// }
+
+		// for _, file := range files {
+		// 	if !file.IsDir() {
+		// 		err := os.RemoveAll(dirPath + "/" + file.Name())
+		// 		if err != nil {
+		// 			log.Fatalf("Error deleting file %s: %v", file.Name(), err)
+		// 		}
+		// 	} else {
+		// 		os.RemoveAll(dirPath + "/" + file.Name())
+		// 	}
+		// }
 
 		// Return stdout as response
 		w.WriteHeader(http.StatusOK)

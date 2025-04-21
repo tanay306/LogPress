@@ -25,6 +25,55 @@ const (
 	maxConcurrent = 100
 )
 
+func isDirectoryEmpty(name string) (bool, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	_, err = f.Readdirnames(1)
+	if err == io.EOF {
+		return true, nil
+	}
+	return false, err
+}
+
+func RemoveFileAndEmptyParents(filePath string) error {
+	if err := os.Remove(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to remove file %q: %w", filePath, err)
+	}
+
+	dir := filepath.Dir(filePath)
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+
+		empty, err := isDirectoryEmpty(dir)
+		if err != nil {
+			return fmt.Errorf("error checking directory %q: %w", dir, err)
+		}
+		if !empty {
+			break
+		}
+
+		if err := os.Remove(dir); err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("failed to remove directory %q: %w", dir, err)
+			}
+		}
+
+		dir = parent
+	}
+
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		log.Fatal("Usage: ./chunk_sender <operation> ...")
@@ -351,6 +400,8 @@ func main() {
 					log.Printf("Failed to copy from %s: %v\n", part.path, err)
 				}
 				inFile.Close()
+
+				RemoveFileAndEmptyParents(part.path)
 			}
 		}
 

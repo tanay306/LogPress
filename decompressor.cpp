@@ -246,6 +246,12 @@ bool decompress_files_template_zlib(const std::string &archive_path,
     for (const auto &kv : file_lines)
     {
         std::filesystem::path out_path = std::filesystem::path(output_folder) / kv.first;
+        auto parent = out_path.parent_path();
+        if (!parent.empty())
+        {
+            std::filesystem::create_directories(parent);
+        }
+
         std::ofstream fout(out_path);
         if (!fout)
         {

@@ -99,6 +99,7 @@ bool store_templates_and_variables(sqlite3 *db,
         file_map[key] = static_cast<uint32_t>(value.get<int>());
         // std::cout << "f " << key << ":" << value << endl;
     }
+    return true;
 }
 
 bool load_templates_and_variables(sqlite3 *db,
