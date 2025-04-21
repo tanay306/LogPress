@@ -80,7 +80,7 @@ func main() {
 			return
 		}
 
-		f, err := os.Create("idmap_response.json")
+		f, err := os.Create("global_dictionary.json")
 		if err != nil {
 			println("Failed to create idmap response file: %s", err.Error())
 			http.Error(w, "Failed to create file", http.StatusInternalServerError)
