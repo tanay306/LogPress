@@ -79,42 +79,6 @@ static bool zlib_compress_buffer(const std::vector<char>& in_data,
     out_data.resize(bound);
     return true;
 }
-// ── Pretty-print compressed data as a string (in human-readable format) ─────────────────────
-std::string compressed_data_to_human_readable(const std::vector<char>& compressed_data)
-{
-    std::ostringstream oss;
-    oss << "Compressed Data (Human-Readable Format):\n";
-
-    for (size_t i = 0; i < compressed_data.size(); ++i) {
-        oss << (0xFF & (unsigned int)compressed_data[i]) << " "; // Print byte as decimal
-        if (i % 16 == 15) { // Newline every 16 bytes for better formatting
-            oss << "\n";
-        }
-    }
-    return oss.str();
-}
-
-// ── Save compressed data to a file in human-readable format ─────────────────────────────────
-bool save_compressed_data_to_file(const std::vector<char>& compressed_data, const std::string& filename)
-{
-    // Get the human-readable string format
-    std::string readable_data = compressed_data_to_human_readable(compressed_data);
-
-    // Open the file for writing
-    std::ofstream readable_out(filename, std::ios::out);
-    if (!readable_out.is_open()) {
-        std::cerr << "Cannot create " << filename << "\n";
-        return false;
-    }
-
-    // Write the human-readable format to the file
-    readable_out << readable_data;
-
-    // Close the file
-    readable_out.close();
-
-    return true;
-}
 
 bool compress_files_template_zlib(const std::vector<std::string>& input_files,
                                   const std::string& archive_path)
@@ -278,13 +242,22 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
     out.write(compressed_data.data(), compressed_data.size());
     out.close();
 
-    if (!save_compressed_data_to_file(compressed_data, "compressed_data.txt")) {
-        std::cerr << "Failed to save compressed data to file.\n";
-        return 1;
+    // Save binary data to a readable file
+    std::ofstream readable_out("readable.txt", std::ios::out);
+    if (!readable_out.is_open()) {
+        std::cerr << "Cannot create readable.txt\n";
+        return false;
     }
 
-    std::cout << "Compressed data saved to 'compressed_data.txt' in human-readable format.\n";
+    // Write binary data as hex to readable.txt
+    for (size_t i = 0; i < compressed_data.size(); ++i) {
+        readable_out << std::hex << (0xFF & (unsigned int)compressed_data[i]) << " ";
+        if (i % 16 == 15) { // Newline every 16 bytes
+            readable_out << "\n";
+        }
+    }
 
+    readable_out.close();
 
     uint64_t final_size = std::filesystem::file_size(archive_path);
     double ratio = 0.0;
