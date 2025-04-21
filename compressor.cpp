@@ -24,7 +24,7 @@ struct ParseResult {
     std::vector<std::string> vars;
 };
 
-static std::regex g_num_regex(R"((?:\d+[.:_-]?)+)");
+static std::regex g_num_regex(R"([+\-]?\d+(?:[._:\-]\d+)*)");
 
 // Replace numeric tokens with <VAR> and extract the raw tokens.
 static ParseResult make_template(const std::string& line) {

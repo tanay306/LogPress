@@ -18,9 +18,9 @@ The archive format starts with the magic `"TMZL"`, followed by the uncompressed 
 To compile the project, use a command similar to the following. Adjust the source file names as necessary if your project is split into multiple files (e.g., `compressor.cpp`, `decompressor.cpp`, `searcher.cpp`, and `main.cpp`):
 
 ```bash
-g++ -std=c++17 -O2 -lz main.cpp -o logpress
+g++ -std=c++17 -O2 main.cpp compressor.cpp decompressor.cpp searcher.cpp -o logpress -lz
 ```
-Make sure that the include paths for zlib and the standard library are set correctly if they’re not in your default locations.
+Make sure that the include paths for zlib and the standard library are set correctly if they’re not in your default locations. If you are using MAC and g++ doesn't work giving '_Alignof' error try using the built in claang compiler.
 
 ## Usage
 
