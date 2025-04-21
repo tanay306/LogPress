@@ -1,6 +1,7 @@
 #include "compressor.hpp"
 
 #include <fstream>
+#include <sstream>
 #include <iostream>
 #include <filesystem>
 #include <unordered_map>
@@ -78,12 +79,47 @@ static bool zlib_compress_buffer(const std::vector<char>& in_data,
     out_data.resize(bound);
     return true;
 }
+// ── Pretty-print compressed data as a string (in human-readable format) ─────────────────────
+std::string compressed_data_to_human_readable(const std::vector<char>& compressed_data)
+{
+    std::ostringstream oss;
+    oss << "Compressed Data (Human-Readable Format):\n";
+
+    for (size_t i = 0; i < compressed_data.size(); ++i) {
+        oss << (0xFF & (unsigned int)compressed_data[i]) << " "; // Print byte as decimal
+        if (i % 16 == 15) { // Newline every 16 bytes for better formatting
+            oss << "\n";
+        }
+    }
+    return oss.str();
+}
+
+// ── Save compressed data to a file in human-readable format ─────────────────────────────────
+bool save_compressed_data_to_file(const std::vector<char>& compressed_data, const std::string& filename)
+{
+    // Get the human-readable string format
+    std::string readable_data = compressed_data_to_human_readable(compressed_data);
+
+    // Open the file for writing
+    std::ofstream readable_out(filename, std::ios::out);
+    if (!readable_out.is_open()) {
+        std::cerr << "Cannot create " << filename << "\n";
+        return false;
+    }
+
+    // Write the human-readable format to the file
+    readable_out << readable_data;
+
+    // Close the file
+    readable_out.close();
+
+    return true;
+}
 
 bool compress_files_template_zlib(const std::vector<std::string>& input_files,
                                   const std::string& archive_path)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
-    // First, let's find total size of all input files (for progress).
     uint64_t total_input_size = 0;
     for (auto &f : input_files) {
         std::error_code ec;
@@ -93,7 +129,6 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
         }
     }
 
-    // We'll accumulate "raw template-based archive" in memory, then zlib-compress it
     std::vector<std::string> templates;
     std::unordered_map<std::string, uint32_t> template_map;
     template_map.reserve(10000);
@@ -108,10 +143,7 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
     uint64_t total_lines       = 0; // number of log lines
     uint64_t bytes_read_so_far = 0; // for progress
 
-    // function for printing progress
     auto print_progress = [&](double ratio, double speed) {
-        // ratio = fraction of total_input_size read
-        // example: ratio=0.37 => 37%
         int pct = (int)(ratio * 100.0);
         std::cerr << "\rCompressing... " << pct << "% | Speed: " << speed << " MB/s";
         std::cerr.flush();
@@ -119,7 +151,7 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
     double next_progress_threshold = 0.0;
     auto last_update_time = std::chrono::high_resolution_clock::now();
 
-
+    // Reading and processing input files
     for (uint32_t f_id = 0; f_id < (uint32_t)input_files.size(); f_id++) {
         filenames.push_back(input_files[f_id]);
 
@@ -131,7 +163,6 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
 
         std::string line;
         while (true) {
-            // We read line by line
             std::streampos before_read_pos = in_file.tellg();
             if (!std::getline(in_file, line)) {
                 if (in_file.eof()) {
@@ -142,18 +173,14 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
             }
             std::streampos after_read_pos = in_file.tellg();
             if (after_read_pos > before_read_pos) {
-                // bytes read from file
                 bytes_read_so_far += (uint64_t)(after_read_pos - before_read_pos);
             }
 
             ++total_lines;
-            // track uncompressed text size
             uncompressed_size += (line.size() + 1); // +1 for newline
 
-            // parse line => template, vars
             auto parse = make_template(line);
 
-            // dictionary look up
             auto it = template_map.find(parse.tpl);
             uint32_t tpl_id;
             if (it == template_map.end()) {
@@ -164,64 +191,55 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
                 tpl_id = it->second;
             }
 
-            // store
             Entry e;
             e.file_id     = f_id;
             e.template_id = tpl_id;
             e.vars        = std::move(parse.vars);
             entries.push_back(std::move(e));
 
-            // progress check
             if (total_input_size > 0) {
                 double ratio = static_cast<double>(bytes_read_so_far) / total_input_size;
 
                 auto now = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double> elapsed = now - last_update_time;
-                double speed = (elapsed.count() > 0) ? (bytes_read_so_far / elapsed.count() / (1024 * 1024)) : 0; // MB/s
+                double speed = (elapsed.count() > 0) ? (bytes_read_so_far / elapsed.count() / (1024 * 1024)) : 0;
 
-                // If ratio >= next_progress_threshold, print and increment threshold
                 if (ratio >= next_progress_threshold) {
                     print_progress(ratio, speed);
-                    next_progress_threshold += 0.01; // e.g. print every 1% of total
+                    next_progress_threshold += 0.01;
                 }
             }
         }
         in_file.close();
     }
 
-    // final progress at 100% if total_input_size was known
     if (total_input_size > 0) {
         print_progress(1.0, 0);
     }
-    std::cerr << "\n"; // newline after progress
+    std::cerr << "\n";
 
-    // now build the in-memory "TMPL" structure
     std::vector<char> uncompressed_data;
     uncompressed_data.reserve(entries.size() * 50 + 100);
 
     auto write_u32 = [&](uint32_t val) {
         char buf[4];
         std::memcpy(buf, &val, 4);
-        uncompressed_data.insert(uncompressed_data.end(), buf, buf+4);
+        uncompressed_data.insert(uncompressed_data.end(), buf, buf + 4);
     };
 
-    // "TMPL" magic
-    const char T_magic[4] = {'T','M','P','L'};
-    uncompressed_data.insert(uncompressed_data.end(), T_magic, T_magic+4);
+    const char T_magic[4] = {'T', 'M', 'P', 'L'};
+    uncompressed_data.insert(uncompressed_data.end(), T_magic, T_magic + 4);
 
-    // template_count, line_count
     uint32_t template_count = (uint32_t)templates.size();
     uint32_t line_count     = (uint32_t)entries.size();
     write_u32(template_count);
     write_u32(line_count);
 
-    // each template
     for (auto &t : templates) {
         write_u32((uint32_t)t.size());
         uncompressed_data.insert(uncompressed_data.end(), t.begin(), t.end());
     }
 
-    // each line => file_id, template_id, var_count, then var strings
     for (auto &e : entries) {
         write_u32(e.file_id);
         write_u32(e.template_id);
@@ -232,28 +250,25 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
         }
     }
 
-    // filenames
     write_u32((uint32_t)filenames.size());
     for (auto &fn : filenames) {
         write_u32((uint32_t)fn.size());
         uncompressed_data.insert(uncompressed_data.end(), fn.begin(), fn.end());
     }
 
-    // compress with zlib
     std::vector<char> compressed_data;
     if (!zlib_compress_buffer(uncompressed_data, compressed_data)) {
         std::cerr << "zlib compression failed.\n";
         return false;
     }
 
-    // final file => "TMZL" + [uncompressed size, compressed size] + compressed_data
     std::ofstream out(archive_path, std::ios::binary);
     if (!out.is_open()) {
         std::cerr << "Cannot create " << archive_path << "\n";
         return false;
     }
 
-    const char Z_magic[4] = {'T','M','Z','L'};
+    const char Z_magic[4] = {'T', 'M', 'Z', 'L'};
     out.write(Z_magic, 4);
 
     uint32_t unc_size = (uint32_t)uncompressed_data.size();
@@ -263,7 +278,14 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
     out.write(compressed_data.data(), compressed_data.size());
     out.close();
 
-    // gather final size from filesystem
+    if (!save_compressed_data_to_file(compressed_data, "compressed_data.txt")) {
+        std::cerr << "Failed to save compressed data to file.\n";
+        return 1;
+    }
+
+    std::cout << "Compressed data saved to 'compressed_data.txt' in human-readable format.\n";
+
+
     uint64_t final_size = std::filesystem::file_size(archive_path);
     double ratio = 0.0;
     if (final_size > 0) {
@@ -273,7 +295,7 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;
 
-    double compression_speed = (elapsed.count() > 0) ? (uncompressed_size / elapsed.count() / (1024 * 1024)) : 0; // MB/s
+    double compression_speed = (elapsed.count() > 0) ? (uncompressed_size / elapsed.count() / (1024 * 1024)) : 0;
     double percentage_reduction = (uncompressed_size > 0) ? ((1.0 - (double)cmp_size / uncompressed_size) * 100) : 0;
 
     std::cout << "\n--- Compression Metrics (Template + zlib) ---\n";
