@@ -175,6 +175,7 @@ bool decompress_files_template_zlib(const std::string& archive_path,
             }
             start = pos + 5;
         }
+
         outs[ln.file_id] << reconstructed << "\n";
     }
 

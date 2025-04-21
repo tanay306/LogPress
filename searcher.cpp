@@ -154,7 +154,19 @@ bool search_archive_template_zlib(const std::string& archive_path,
             found_any = true;
             uint32_t f_id = ln.file_id;
             std::string fn = (f_id < file_count ? filenames[f_id] : "UNKNOWN");
-            std::cout << fn << ": " << line << "\n";
+
+            std::string cluster_id;
+            size_t cluster_pos = line.find("|ClusterID:");
+            if (cluster_pos != std::string::npos) {
+                cluster_id = line.substr(cluster_pos);
+                line.erase(cluster_pos); // Remove the Cluster ID from the line
+            }
+
+            // Print with formatting, including the cluster ID separately
+            std::cout << std::setw(30) << std::left << fn // File name aligned
+                      << " : " 
+                      << std::setw(15) << std::left << cluster_id // Cluster ID aligned
+                      << " : " << line << "\n";
         }
     }
 
