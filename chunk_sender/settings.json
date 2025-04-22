@@ -1,3 +1,4 @@
 {
-    "worker1": "http://chunk_reciever:8081"
+    "worker1": "http://chunk_reciever_1:8081",
+    "worker2": "http://chunk_reciever_2:8081"
 }

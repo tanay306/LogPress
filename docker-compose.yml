@@ -1,5 +1,15 @@
 version: "3.8"
 
+# x-chunk-reciever-common: &chunk-reciever-common
+#   build:
+#     context: .
+#     dockerfile: chunk_reciever/Dockerfile
+#   image: chunk_reciever
+#   depends_on:
+#     - dbserver
+#   environment:
+#     - DBSERVER_URL=http://dbserver:8083
+
 services:
   dbserver:
     build:
@@ -10,14 +20,39 @@ services:
     ports:
       - "8083:8083"
 
-  chunk_reciever:
+  # chunk_reciever_1:
+  #   <<: *chunk-reciever-common
+  #   ports:
+  #     - "8081:8081"
+  #   container_name: chunk_reciever_1
+
+  # chunk_reciever_2:
+  #   <<: *chunk-reciever-common
+  #   ports:
+  #     - "8082:8081"
+  #   container_name: chunk_reciever_2
+
+  chunk_reciever_1:
     build:
       context: .
       dockerfile: chunk_reciever/Dockerfile
     image: chunk_reciever
-    container_name: chunk_reciever
+    container_name: chunk_reciever_1
     ports:
       - "8081:8081"
+    depends_on:
+      - dbserver
+    environment:
+      - DBSERVER_URL=http://dbserver:8083
+
+  chunk_reciever_2:
+    build:
+      context: .
+      dockerfile: chunk_reciever/Dockerfile
+    image: chunk_reciever
+    container_name: chunk_reciever_2
+    ports:
+      - "8082:8081"
     depends_on:
       - dbserver
     environment:
@@ -30,6 +65,7 @@ services:
     image: chunk_sender
     container_name: chunk_sender
     depends_on:
-      - chunk_reciever
+      - chunk_reciever_1
+      - chunk_reciever_2
     environment:
       - CHUNK_RECEIVER_URL=http://chunk_reciever:8081
