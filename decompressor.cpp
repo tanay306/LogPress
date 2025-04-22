@@ -176,7 +176,6 @@ bool decompress_files_template_zlib(const std::string &archive_path,
     in.read(reinterpret_cast<char *>(&blk_size), 4);
     in.read(reinterpret_cast<char *>(&comp_size), 4);
     // comp_size = 4918386;
-    std::cout << lines_val << ":" << blk_size << ":" << comp_size << std::endl;
 
     // Read compressed block
     std::vector<char> comp(comp_size);

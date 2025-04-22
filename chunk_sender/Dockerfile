@@ -6,4 +6,5 @@ RUN apk add --no-cache make \
 WORKDIR /app
 COPY . .
 RUN go build chunk_sender.go
+RUN dos2unix ./HDFS2.log 
 CMD echo "Run iteractive"

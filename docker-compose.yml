@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  dbserver:
+    build:
+      context: ./dbserver
+      dockerfile: Dockerfile
+    image: dbserver
+    container_name: dbserver
+    ports:
+      - "8083:8083"
+
+  chunk_reciever:
+    build:
+      context: .
+      dockerfile: chunk_reciever/Dockerfile
+    image: chunk_reciever
+    container_name: chunk_reciever
+    ports:
+      - "8081:8081"
+    depends_on:
+      - dbserver
+    environment:
+      - DBSERVER_URL=http://dbserver:8083
+
+  chunk_sender:
+    build:
+      context: ./chunk_sender
+      dockerfile: Dockerfile
+    image: chunk_sender
+    container_name: chunk_sender
+    depends_on:
+      - chunk_reciever
+    environment:
+      - CHUNK_RECEIVER_URL=http://chunk_reciever:8081

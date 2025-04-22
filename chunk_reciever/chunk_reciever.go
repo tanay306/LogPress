@@ -159,7 +159,7 @@ func main() {
 		}
 
 		// Create the HTTP POST request
-		url := "http://localhost:8083/upload" // Replace with your target URL
+		url := "http://dbserver:8083/upload" // Replace with your target URL
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(fileContents))
 		if err != nil {
 			log.Fatalf("Error creating HTTP request: %v", err)
