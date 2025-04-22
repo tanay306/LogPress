@@ -20,7 +20,7 @@ struct ParseResult {
 // Main compression entry point
 bool compress_files_template_zlib(const std::vector<std::string>& input_files,
                                   const std::string& archive_path,
-                                  size_t lines_per_block = 4096);
+                                  size_t lines_per_block = 10000);
 
 // Extraction + classification for test harness use
 ParseResult make_typed_template(const std::string& line);

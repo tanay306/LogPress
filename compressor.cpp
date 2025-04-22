@@ -13,6 +13,61 @@
 #include <iomanip>      
 #include <unordered_set> 
 
+void display_progress_bar(double percentage, double speed_lines_per_sec, 
+                         size_t bytes_processed = 0, double eta_seconds = -1) {
+    const int bar_width = 40;
+    int filled_width = static_cast<int>(percentage * bar_width);
+    
+    // Unicode block characters for smoother gradient
+    const char* block_chars[] = {" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"};
+    
+    // Calculate fractional part for smoother bar
+    int whole_blocks = filled_width;
+    int fractional_idx = static_cast<int>((percentage * bar_width - whole_blocks) * 8);
+    if (fractional_idx < 0) fractional_idx = 0;
+    if (fractional_idx > 7) fractional_idx = 0;
+    
+    // Print progress bar
+    std::cout << "\r[";
+    for (int i = 0; i < bar_width; ++i) {
+        if (i < whole_blocks) {
+            std::cout << "█"; // Solid block for completed portions
+        } else if (i == whole_blocks && fractional_idx > 0) {
+            std::cout << block_chars[fractional_idx]; // Partial block
+        } else {
+            std::cout << " "; // Empty space
+        }
+    }
+    
+    // Format percentage
+    std::cout << "] " << std::fixed << std::setprecision(1) 
+              << (percentage * 100.0) << "% ";
+    
+    // Format speed
+    std::cout << "(" << std::setprecision(1) << speed_lines_per_sec 
+              << " lines/sec";
+    
+    // Format bytes processed if provided
+    if (bytes_processed > 0) {
+        double mb_processed = bytes_processed / (1024.0 * 1024.0);
+        std::cout << ", " << std::setprecision(2) << mb_processed << " MB";
+    }
+    
+    // Format ETA if provided
+    if (eta_seconds > 0) {
+        int minutes = static_cast<int>(eta_seconds) / 60;
+        int seconds = static_cast<int>(eta_seconds) % 60;
+        
+        if (minutes > 0) {
+            std::cout << ", ETA: " << minutes << "m " << seconds << "s";
+        } else {
+            std::cout << ", ETA: " << seconds << "s";
+        }
+    }
+    
+    std::cout << ")     " << std::flush;
+}
+
 // Utility to write uint32_t
 void write_u32(std::vector<char>& buf, uint32_t v) {
     char tmp[4];
@@ -78,11 +133,27 @@ bool zlib_compress_block(const std::vector<char>& in, std::vector<char>& out, co
 bool compress_files_template_zlib(const std::vector<std::string>& input_files,
                                   const std::string& archive_path,
                                   size_t lines_per_block) {
+    using clock = std::chrono::steady_clock;
+    auto compression_start_time = clock::now();
+    auto last_update_time = clock::now();
+    
     std::unordered_map<std::string, uint32_t> tpl_map, var_map, file_map;
     std::vector<std::string> templates, variables, files;
     std::vector<char> current_block;
     std::vector<std::vector<char>> blocks;
     size_t total_lines = 0;
+    size_t bytes_processed = 0;
+    size_t last_progress_update = 0;
+
+    // Estimate total size from file sizes (instead of counting lines)
+    std::cout << "Estimating workload... ";
+    size_t total_bytes = 0;
+    for (const auto& file : input_files) {
+        std::error_code ec;
+        total_bytes += std::filesystem::file_size(file, ec);
+    }
+    std::cout << "found " << total_bytes / (1000 * 1000) << " MB to process\n";
+    std::cout << "Starting compression..." << std::endl;
 
     for (const auto& file : input_files) {
         std::ifstream in(file);
@@ -93,6 +164,7 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
 
         std::string line;
         while (std::getline(in, line)) {
+            bytes_processed += line.size() + 1; // +1 for newline
             ParseResult pr = make_typed_template(line);
 
             if (pr.tpl.empty()) continue;
@@ -118,6 +190,29 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
                 blocks.push_back(std::move(current_block));
                 current_block.clear();
             }
+
+            // Update progress based on bytes processed instead of lines
+            if (total_lines - last_progress_update >= 1000 || 
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    clock::now() - last_update_time).count() > 100) {
+                
+                // In the compression loop where you update progress:
+                double progress = static_cast<double>(bytes_processed) / total_bytes;
+                auto current_time = clock::now();
+                double elapsed_sec = std::chrono::duration<double>(current_time - compression_start_time).count();
+                double speed = elapsed_sec > 0 ? total_lines / elapsed_sec : 0;
+
+                // Calculate ETA
+                double eta = -1;
+                if (progress > 0 && speed > 0) {
+                    eta = (total_bytes - bytes_processed) / (bytes_processed / elapsed_sec);
+                }
+
+                // Display progress with all metrics
+                display_progress_bar(progress, speed, bytes_processed, eta);
+                last_progress_update = total_lines;
+                last_update_time = current_time;
+            }
         }
     }
 
@@ -130,7 +225,7 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
     // Build meta database path: "db/<archive_filename>.meta.db"
     std::filesystem::path archive_p(archive_path);
     std::filesystem::path meta_path = "./db/" + (archive_p.filename().string() + ".meta.db");
-    std::cout << "📂 Opening meta.db at: " << meta_path << "\n";
+    std::cout << "\n📂 Opening meta.db at: " << meta_path << "\n";
 
     // SQLite metadata
     sqlite3* db = nullptr;
