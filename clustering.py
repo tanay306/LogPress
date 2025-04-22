@@ -5,8 +5,9 @@ from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import DBSCAN
 from sklearn.decomposition import TruncatedSVD
+from collections import Counter
 
-logfile_path = "HDFS.log"  # Update this with your log file path
+logfile_path = "Mac.log"  # Update this with your log file path
 
 # Read the log file into a DataFrame or a list of log lines
 with open(logfile_path, "r") as file:
@@ -16,8 +17,48 @@ with open(logfile_path, "r") as file:
 # Example: log_df = pd.read_csv(logfile_path, delimiter="\t")  # adjust accordingly
 print(f"Total loglines: {len(loglines)}")
 
+threshold = len(loglines) / 100
+
 def preprocess_logs(loglines):
     return loglines
+
+def extract_templates_and_frequencies(loglines):
+    num_regex = re.compile(r"[+-]?\d+(?:[._:\-]?\d+)*")
+    template_freq = Counter()  # To count occurrences of each template
+
+    for line in loglines:
+        start_pos = 0
+        template = ""
+        
+        # Search for numeric values in the line
+        for match in num_regex.finditer(line):
+            match_start = match.start()
+            match_end = match.end()
+            
+            # Add the part of the line before the numeric token to the template
+            template += line[start_pos:match_start]
+            template += "<VAR>"  # Placeholder for the number
+            
+            # Update start position for the next search
+            start_pos = match_end
+        
+        # Add the remaining part of the line after the last numeric token
+        template += line[start_pos:]
+        
+        # Increment frequency of this template
+        template_freq[template] += 1
+
+    return template_freq
+
+# Function to get the most frequent template
+def most_frequent_template(template_freq, threshold=500):
+    # Get the template with the highest frequency
+    high_freq_templates = [tpl for tpl, freq in template_freq.items() if freq > threshold]
+    
+    # Return the number of such templates
+    return len(high_freq_templates)
+
+template_freq = extract_templates_and_frequencies(loglines)
 
 cleaned_logs = preprocess_logs(loglines)
 
@@ -25,8 +66,10 @@ cleaned_logs = preprocess_logs(loglines)
 vectorizer = TfidfVectorizer(max_features=1000)
 log_vectors = vectorizer.fit_transform(cleaned_logs)
 
-# Step 5: DBSCAN clustering
-n_clusters = 7
+# Step 5: KMeans clustering
+n_clusters = most_frequent_template(template_freq, threshold)
+
+print("Dividing loglines in : ", n_clusters, " clustrers")
 kmeans = KMeans(n_clusters=n_clusters, random_state=42)
 
 # Get the cluster labels for each log line

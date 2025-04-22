@@ -22,6 +22,7 @@
  */
 
 static std::regex g_num_regex(R"([+-]?\d+(?:[._:\-]?\d+)*)");
+static std::regex g_cluster_regex(R"(ClusterID:\s*(\d+))");
 
 // For in-memory line representation
 struct Entry {
@@ -80,10 +81,42 @@ static bool zlib_compress_buffer(const std::vector<char>& in_data,
     return true;
 }
 
+static void count_logs_by_cluster(const std::vector<std::string>& input_files) {
+    std::unordered_map<int, uint32_t> cluster_count;
+
+    for (const auto& file_path : input_files) {
+        std::ifstream in_file(file_path);
+        if (!in_file.is_open()) {
+            std::cerr << "\nCannot open " << file_path << "\n";
+            return;
+        }
+
+        std::string line;
+        while (std::getline(in_file, line)) {
+            std::smatch match;
+            if (std::regex_search(line, match, g_cluster_regex)) {
+                int cluster_id = std::stoi(match[1].str());
+                cluster_count[cluster_id]++;
+            }
+        }
+
+        in_file.close();
+    }
+
+    // Display the cluster counts
+    std::cout << "\n--- Dividing into clusters ---\n";
+    for (const auto& pair : cluster_count) {
+        std::cout << "Cluster " << pair.first << ": " << pair.second << " logs\n";
+    }
+    std::cout << "---------------------------\n";
+}
+
 bool compress_files_template_zlib(const std::vector<std::string>& input_files,
                                   const std::string& archive_path)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
+
+    count_logs_by_cluster(input_files);
     uint64_t total_input_size = 0;
     for (auto &f : input_files) {
         std::error_code ec;
@@ -220,6 +253,8 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
         uncompressed_data.insert(uncompressed_data.end(), fn.begin(), fn.end());
     }
 
+    uint64_t size_before_compression = uncompressed_data.size();
+
     std::vector<char> compressed_data;
     if (!zlib_compress_buffer(uncompressed_data, compressed_data)) {
         std::cerr << "zlib compression failed.\n";
@@ -234,6 +269,49 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
 
     const char Z_magic[4] = {'T', 'M', 'Z', 'L'};
     out.write(Z_magic, 4);
+    // Save raw uncompressed data in human-readable format to a file
+    std::ofstream readable_human_out("tmpl_format_human_readable.txt", std::ios::out);
+    if (!readable_human_out.is_open()) {
+        std::cerr << "Cannot create tmpl_format_human_readable.txt\n";
+        return false;
+    }
+
+    // Write the "TMPL" magic string for clarity
+    readable_human_out << "TMPL Magic: T M P L\n\n";
+
+    // Write the template count and line count
+    uint32_t tmpl_count = (uint32_t)templates.size();
+    uint32_t ln_count = (uint32_t)entries.size();
+    readable_human_out << "Total Templates: " << tmpl_count << "\n";
+    readable_human_out << "Total Entries: " << ln_count << "\n\n";
+
+    // Write each template with its size and content
+    readable_human_out << "--- Templates ---\n";
+    for (const auto& t : templates) {
+        readable_human_out << "Template size: " << t.size() << "\n";
+        readable_human_out << "Template content: " << t << "\n\n";
+    }
+
+    // Write each entry (file_id, template_id, vars)
+    readable_human_out << "--- Entries ---\n";
+    for (const auto& e : entries) {
+        readable_human_out << "File ID: " << e.file_id << "\n";
+        readable_human_out << "Template ID: " << e.template_id << "\n";
+        readable_human_out << "Variables count: " << e.vars.size() << "\n";
+        
+        for (size_t i = 0; i < e.vars.size(); ++i) {
+            readable_human_out << "Var " << i+1 << ": " << e.vars[i] << "\n";
+        }
+        readable_human_out << "\n";
+    }
+
+    // Write the filenames
+    readable_human_out << "--- Filenames ---\n";
+    for (const auto& fn : filenames) {
+        readable_human_out << "Filename: " << fn << "\n";
+    }
+
+    readable_human_out.close();
 
     uint32_t unc_size = (uint32_t)uncompressed_data.size();
     uint32_t cmp_size = (uint32_t)compressed_data.size();
@@ -264,6 +342,8 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
     if (final_size > 0) {
         ratio = double(uncompressed_size) / double(final_size);
     }
+    double ratio2 = 0.0;
+    ratio2 = double(uncompressed_size) / double(size_before_compression);
 
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;
@@ -272,15 +352,19 @@ bool compress_files_template_zlib(const std::vector<std::string>& input_files,
     double percentage_reduction = (uncompressed_size > 0) ? ((1.0 - (double)cmp_size / uncompressed_size) * 100) : 0;
 
     std::cout << "\n--- Compression Metrics (Template + zlib) ---\n";
-    std::cout << "Total lines read:          " << total_lines << "\n";
-    std::cout << "Unique templates:          " << templates.size() << "\n";
-    std::cout << "Uncompressed size (bytes): " << uncompressed_size << "\n";
-    std::cout << "Compressed size (bytes):   " << final_size << "\n";
-    std::cout << "Compression ratio:         " << ratio << " (uncompressed/.myclp)\n";
-    std::cout << "Compression time:          " << elapsed.count() << " seconds\n";
-    std::cout << "Compression speed:         " << compression_speed << " MB/s\n";
-    std::cout << "Size reduction:            " << percentage_reduction << "%\n";
+    std::cout << "Total lines read:              " << total_lines << "\n";
+    std::cout << "Unique templates:              " << templates.size() << "\n";
+    std::cout << "Uncompressed size (bytes):     " << uncompressed_size << "\n";
+    std::cout << "Uncompressed size (bytes):     " << uncompressed_size << "\n";
+    std::cout << "Compressed before zlib:        " << size_before_compression << "\n";
+    std::cout << "Compressed size (bytes):       " << final_size << "\n";
+    std::cout << "Compression ratio before zlib: " << ratio2 << " (uncompressed/.myclp)\n";
+    std::cout << "Compression ratio:             " << ratio << " (uncompressed/.myclp)\n";
+    std::cout << "Compression time:              " << elapsed.count() << " seconds\n";
+    std::cout << "Compression speed:             " << compression_speed << " MB/s\n";
+    std::cout << "Size reduction:                " << percentage_reduction << "%\n";
     std::cout << "----------------------------------------------\n";
 
     return true;
 }
+

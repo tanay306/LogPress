@@ -1,10 +1,50 @@
 #include <iostream>
+#include <fstream>
+#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "compressor.hpp"
 #include "decompressor.hpp"
 #include "searcher.hpp"
+
+std::vector<std::string> get_log_files(const std::string& path) {
+    std::vector<std::string> files;
+    std::filesystem::path p(path);
+    if (std::filesystem::is_regular_file(p)) {
+        files.push_back(p.string());
+    } else if (std::filesystem::is_directory(p)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(p)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".log") {
+                files.push_back(entry.path().string());
+            }
+        }
+    }
+    return files;
+}
+
+void save_logs_to_single_file(const std::string& path, const std::string& output_file) {
+    std::vector<std::string> log_files = get_log_files(path);
+    
+    std::ofstream out(output_file, std::ios::out | std::ios::trunc);
+    if (!out.is_open()) {
+        std::cerr << "Failed to open output file: " << output_file << std::endl;
+        return;
+    }
+
+    for (const auto& file : log_files) {
+        std::ifstream in(file);
+        if (in.is_open()) {
+            out << in.rdbuf();
+            in.close();
+        } else {
+            std::cerr << "Failed to open log file: " << file << std::endl;
+        }
+    }
+
+    out.close();
+}
+
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -56,6 +96,12 @@ int main(int argc, char* argv[]) {
             std::cerr << "Search failed.\n";
             return 1;
         }
+    }
+    else if (command == "get") {
+        std::string archive_path = argv[2];
+        std::string output_file = "combined_logs.txt";        // Replace with desired output file path
+        save_logs_to_single_file(archive_path, output_file);
+        std::cout << "Logs have been saved to " << output_file << std::endl;
     }
     else {
         std::cerr << "Unknown command: " << command << "\n";
