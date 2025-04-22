@@ -122,6 +122,8 @@ bool decompress_files_template_zlib(const std::string &archive_path,
         return false;
     }
 
+    std::cout << "Done loading global dictionary" << std::endl;
+
     // Build dictionary string for zlib
     std::string dict;
     std::vector<std::string> sorted;
@@ -190,7 +192,7 @@ bool decompress_files_template_zlib(const std::string &archive_path,
     //     std::cerr << "❌ Decompression failed\n";
     //     return false;
     // }
-    std::cout << "decompression done" << std::endl;
+    std::cout << "Zlib decompression done" << std::endl;
 
     // Parse block entries
     size_t offset = 0;
@@ -228,7 +230,7 @@ bool decompress_files_template_zlib(const std::string &archive_path,
 
     debug_file.close();
 
-    std::cout << "parsing done" << std::endl;
+    std::cout << "Parsing " << archive_path << " for logs done." << std::endl;
 
     std::unordered_map<std::string, std::vector<std::string>> file_lines;
     for (const auto &e : entries)

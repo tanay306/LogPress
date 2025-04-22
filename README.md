@@ -11,6 +11,7 @@
 ## Archive Format 🗃️
 
 An archive created by Logpress consists of:
+
 - A file header starting with the magic string `"TMZL"`.
 - A global metadata section (prefixed with `"TMPL"`) that includes a dictionary of templates, variables, and filenames.
 - One or more compressed blocks containing the actual log data, compressed using zlib with a custom dictionary.
@@ -19,7 +20,7 @@ An archive created by Logpress consists of:
 
 - A C++ compiler with C++17 support (e.g., **g++** or **clang++**).
 - [zlib](https://zlib.net/) development library (ensure you link with `-lz`).
-- *(Optional)* [CMake](https://cmake.org/) for generating the build configuration.
+- _(Optional)_ [CMake](https://cmake.org/) for generating the build configuration.
 
 ## Building the Project 🛠️
 
@@ -29,7 +30,7 @@ An archive created by Logpress consists of:
 g++ -g -o logpress main.cpp compressor.cpp decompressor.cpp searcher.cpp sqlite_helper.cpp -lz -lsqlite3
 ```
 
-*Adjust the source file names if your project structure differs.*
+_Adjust the source file names if your project structure differs._
 
 ### Using CMake
 
@@ -106,7 +107,7 @@ Search for log lines matching a specific term within an archive without needing 
 ## Internal Details 🔍
 
 - **Template-Based Compression:**  
-  Logpress deduplicates log entries by extracting and compressing common templates and numeric tokens.  
+  Logpress deduplicates log entries by extracting and compressing common templates and numeric tokens.
 - **Custom Zlib Dictionary:**  
   A custom dictionary is generated from templates, filenames, and variables. This dictionary is used during compression (and decompression) to improve compression ratios.
 - **Metadata Storage:**  
@@ -125,7 +126,7 @@ Search for log lines matching a specific term within an archive without needing 
   - `searcher.cpp`
   - `sqlite_helper.cpp`
   - `main.cpp`
-- **Troubleshooting:**  
+- **Troubleshooting:**
   - Ensure `zlib` is correctly installed and linked (use `-lz`).
   - For sqlite issues, if you're using Homebrew on macOS, you may need to adjust your PATH or force-link sqlite:
     ```bash
@@ -138,3 +139,10 @@ Search for log lines matching a specific term within an archive without needing 
     to your `~/.zshrc`.
 
 Enjoy using **Logpress** to effectively manage and search through your logs! 🎉
+
+For building use
+
+sudo docker-compose up --build
+
+To run the compressor
+sudo docker run -it --rm --network logpress2_default --entrypoint /bin/sh chunk_sender

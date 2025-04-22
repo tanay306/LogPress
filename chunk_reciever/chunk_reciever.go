@@ -123,7 +123,7 @@ func main() {
 			println("Error writing file")
 			return
 		}
-		println("wrote file:", filename)
+		// println("wrote file:", filename)
 
 		wg.Done()
 
@@ -227,6 +227,44 @@ func main() {
 	})
 
 	http.HandleFunc("/decompress", func(w http.ResponseWriter, r *http.Request) {
+
+		url := "http://dbserver:8083/getGlobalDictionary"
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			log.Fatalf("Error creating HTTP request: %v", err)
+		}
+
+		// Set the appropriate headers for sending JSON
+		req.Header.Set("Content-Type", "application/json")
+
+		// Send the request using the HTTP client
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Fatalf("Error sending request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Handle the response
+		if resp.StatusCode == http.StatusOK {
+			fmt.Println("Successfully sent the JSON file!")
+
+			// Read the response body (expecting JSON) using io.ReadAll
+			responseBody, err := io.ReadAll(resp.Body)
+			if err != nil {
+				log.Fatalf("Error reading response body: %v", err)
+			}
+
+			// Save the response JSON to dictionaries.json using os.WriteFile
+			err = os.WriteFile("dictionaries.json", responseBody, 0644)
+			if err != nil {
+				log.Fatalf("Error saving dictionaries.json: %v", err)
+			}
+			fmt.Println("Successfully saved response to dictionaries.json")
+		} else {
+			fmt.Printf("Failed to send the file. Status: %s\n", resp.Status)
+		}
+
 		cmd := exec.Command("../logpress", "decompress", "compressed_archive"+port+".mylp", "output"+port)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

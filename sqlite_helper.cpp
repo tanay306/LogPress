@@ -41,7 +41,7 @@ bool store_templates_and_variables2(sqlite3 *db,
                                     std::unordered_map<std::string, uint32_t> &file_map)
 {
     const std::string json_path = "variables.json";
-    std::cout << "[JSON] Writing to " << json_path << " with "
+    std::cout << "Writing to " << json_path << " with "
               << templates.size() << " templates, "
               << variables.size() << " variables, "
               << files.size() << " files\n";
@@ -62,7 +62,7 @@ bool store_templates_and_variables2(sqlite3 *db,
     out << j.dump(2); // pretty-print with 2-space indentation
     out.close();
 
-    std::cout << "[JSON] Done writing to " << json_path << " ✅\n";
+    std::cout << "Done writing to " << json_path << " \n";
     return true;
 }
 
@@ -188,9 +188,9 @@ bool load_templates_and_variables(sqlite3 *db,
         return false;
     }
 
-    std::cout << "[JSON] Loaded " << templates.size() << " templates, "
+    std::cout << "Loaded " << templates.size() << " templates, "
               << variables.size() << " variables, "
-              << files.size() << " files ✅\n";
+              << files.size() << " files \n";
 
     return true;
 }

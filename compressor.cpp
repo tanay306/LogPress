@@ -203,7 +203,7 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
         }
     }
 
-    std::cout << "Done writing to block" << std::endl;
+    // std::cout << "Done writing to block" << std::endl;
 
     // // Build dictionary
     std::string dict;
@@ -277,7 +277,7 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
 
     // // blk_idx++;
 
-    std::cout << "Done writing parsed block" << std::endl;
+    // std::cout << "Done writing parsed block" << std::endl;
 
     std::vector<char> comp;
     compress_blk_to_comp(blk, comp);
@@ -287,7 +287,7 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
     //     return false;
     // }
 
-    std::cout << "zlib part done for blkid" << std::endl;
+    std::cout << "Compressiong using zlib completed" << std::endl;
 
     uint32_t lines_val = static_cast<uint32_t>(total_lines);
     uint32_t blk_size = static_cast<uint32_t>(blk.size());
@@ -295,7 +295,7 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
     archive_size_no_zlib += 12 + blk_size;    // header + raw block
     archive_size_with_zlib += 12 + comp_size; // header + compressed block
 
-    std::cout << lines_val << ":" << blk_size << ":" << comp_size << std::endl;
+    // std::cout << lines_val << ":" << blk_size << ":" << comp_size << std::endl;
     out.write(reinterpret_cast<const char *>(&lines_val), 4);
     out.write(reinterpret_cast<const char *>(&blk_size), 4);
     out.write(reinterpret_cast<const char *>(&comp_size), 4);
@@ -305,18 +305,18 @@ bool compress_files_template_zlib(const std::vector<std::string> &input_files,
     // }
     // std::cout << "[DEBUG] Final: variables.size()=" << variables.size();
 
-    std::cout << "📦 Compressed " << total_lines << " lines in " << blocks.size() << " blocks.\n";
-    std::cout << "📊 Templates: " << templates.size()
+    std::cout << "Compressed " << total_lines << " lines.\n";
+    std::cout << "Templates: " << templates.size()
               << ", Variables: " << variables.size()
               << ", Files: " << files.size() << "\n";
-    std::cout << "🧠 Dict Size: " << dict.size() / (1000 * 1000) << " MB (saved to compression.dict)\n";
+    std::cout << "Dict Size: " << dict.size() / (1000 * 1000) << " MB (saved to compression.dict)\n";
     // Verify file size on disk
     std::error_code ec;
     auto actual_fs_size = std::filesystem::file_size(archive_path, ec);
 
     std::cout << std::fixed << std::setprecision(2)
-              << "\n📏 Archive size (NO  zlib): " << static_cast<double>(archive_size_no_zlib) / (1000 * 1000) << " mb\n"
-              << "🗜️  Archive size (WITH zlib): " << static_cast<double>(archive_size_with_zlib) / (1000 * 1000) << " mb\n";
+              << "\nArchive size (NO  zlib): " << static_cast<double>(archive_size_no_zlib) / (1000 * 1000) << " mb\n"
+              << "Archive size (WITH zlib): " << static_cast<double>(archive_size_with_zlib) / (1000 * 1000) << " mb\n";
     return true;
 }
 

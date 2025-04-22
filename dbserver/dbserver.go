@@ -35,7 +35,7 @@ func main() {
 			return
 		}
 
-		println("Got request")
+		println("Got request to upload")
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -66,6 +66,8 @@ func main() {
 			return
 		}
 
+		println("Finished updating database")
+
 		err = getDictionary(db, idMap)
 		if err != nil {
 			http.Error(w, "Failed to get dictionary", http.StatusInternalServerError)
@@ -86,6 +88,7 @@ func main() {
 			http.Error(w, "Failed to create file", http.StatusInternalServerError)
 			return
 		}
+		println("Done writing the global_dictionary.json")
 		defer f.Close()
 
 		// 2. Write the JSON bytes to the file
@@ -100,10 +103,66 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write(response)
 
-		// fmt.Fprintln(w, "Inserted JSON data into SQLite tables successfully.")
+		filePath := "./logdata.db"
+
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+
+		fileSize := fileInfo.Size()
+		sizeMB := float64(fileSize) / (1024.0 * 1024.0)
+		fmt.Printf("Database final size: %.2f MB\n", sizeMB)
+
 	})
 
-	fmt.Println("Server started at :8083")
+	http.HandleFunc("/getGlobalDictionary", func(w http.ResponseWriter, r *http.Request) {
+		println("Got request")
+
+		idMap := make(map[string]map[string]int64)
+
+		println("Finished updating database")
+
+		err = getDictionary(db, idMap)
+		if err != nil {
+			http.Error(w, "Failed to get dictionary", http.StatusInternalServerError)
+			println("Failed to get dictionary: %s", err.Error())
+			return
+		}
+
+		response, err := json.Marshal(idMap)
+		if err != nil {
+			http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+			println("Failed to marshal response: %s", err.Error())
+			return
+		}
+
+		f, err := os.Create("global_dictionary.json")
+		if err != nil {
+			println("Failed to create idmap response file: %s", err.Error())
+			http.Error(w, "Failed to create file", http.StatusInternalServerError)
+			return
+		}
+		println("Done writing the global_dictionary.json")
+		defer f.Close()
+
+		// 2. Write the JSON bytes to the file
+		if _, err := f.Write(response); err != nil {
+			println("Failed to  write response to file: %s", err.Error())
+			http.Error(w, "Failed to write response to file"+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		println("Sent the request global_dictionary.json.")
+
+		// Set the content type to JSON and write the response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(response)
+	})
+
+	fmt.Println("Database Server started at 8083")
 	log.Fatal(http.ListenAndServe(":8083", nil))
 }
 

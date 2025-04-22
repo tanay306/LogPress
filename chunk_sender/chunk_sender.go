@@ -170,7 +170,7 @@ func main() {
 
 			currentSeq := sequence
 
-			println("last sequence", currentSeq)
+			println("Uploading chunks = ", currentSeq)
 
 			req, err := http.NewRequest("POST", target, strings.NewReader(data))
 			if err != nil {
@@ -202,6 +202,7 @@ func main() {
 		var wg2 sync.WaitGroup
 		successChan := make(chan bool, len(workers))
 
+		println("Compressing...")
 		for _, url := range workers {
 			wg2.Add(1)
 			go func(url string) {
