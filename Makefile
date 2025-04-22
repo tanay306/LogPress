@@ -6,7 +6,7 @@ GOBUILD      := $(GOCMD) build
 
 CXX          := g++
 CXXFLAGS     := -g
-LDFLAGS      := -lz -lsqlite3
+LDFLAGS      := -lz -lsqlite3 -lcurl
 
 # --- Directories ---
 DBSERVER_DIR := dbserver

@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <map>
 #include <sqlite3.h>
+#include <cstdint>
 #include "compressor.hpp"
 
 bool initialize_db(sqlite3 *&db, const std::string &db_path);
