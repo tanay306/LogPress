@@ -1,12 +1,11 @@
-# Template-Based Log Compressor & Searcher
+# This is a Test feature branch
 
-This project provides a command-line utility to compress log files using a template-based approach combined with zlib compression. It supports three main commands:
+Owner of this branch - ndudhel [Neel Dudheliya](https://github.com/Neel317)
 
-- **compress**: Compress one or more log files into a single archive.
-- **decompress**: Decompress an archive and reconstruct the original log files.
-- **search**: Search within the compressed archive for log lines matching a given search term.
+- This branch is an intermediary testing branch for Chunk-based compression algorithm. The final branch with the latest code can be found here. [parallel-search](https://github.com/tanay306/LogPress/tree/parallel-search)
 
-The archive format starts with the magic `"TMZL"`, followed by the uncompressed size, compressed size, and the zlib-compressed data. The internal uncompressed data begins with `"TMPL"` and includes the dictionary of templates, log lines, and filenames.
+- We are keeping all the test branch to show contribution.
+
 
 ## Prerequisites
 
