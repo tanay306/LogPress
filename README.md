@@ -1,5 +1,7 @@
 # Logpress: Template-Based Log Compressor & Searcher 🚀
 
+Owner of this branch - ndudhel [Neel Dudheliya](https://github.com/Neel317)
+
 **Logpress**  is a command-line utility designed to efficiently compress, decompress, and search log files using a template-based approach. It leverages zlib (with a custom dictionary) to achieve high compression rates by deduplicating common log patterns.
 
 ## Features ✨
