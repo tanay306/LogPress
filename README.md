@@ -1,24 +1,27 @@
 # Logpress: Template-Based Log Compressor & Searcher 🚀
 
-**Logpress** is a command-line utility designed to efficiently compress, decompress, and search log files using a template-based approach. It leverages zlib (with a custom dictionary) to achieve high compression rates by deduplicating common log patterns.
+**Logpress**  is a command-line utility designed to efficiently compress, decompress, and search log files using a template-based approach. It leverages zlib (with a custom dictionary) to achieve high compression rates by deduplicating common log patterns.
 
 ## Features ✨
 
-- **Compress:** Bundle one or more log files into a single archive.
+- **Compress:** Bundle one or more log files into a single archive with real-time progress tracking.
 - **Decompress:** Reconstruct original log files from a compressed archive.
-- **Search:** Quickly search through compressed logs for specific terms—without fully decompressing the archive.
+- **Search:** Quickly search through compressed logs using multithreaded processing—without fully decompressing the archive.
+- **High Performance:** Utilize multiple CPU cores for faster searching while maintaining log order.
+- **Visual Feedback:** Track compression progress with an intuitive progress bar.
 
 ## Archive Format 🗃️
 
 An archive created by Logpress consists of:
-- A file header starting with the magic string `"TMZL"`.
-- A global metadata section (prefixed with `"TMPL"`) that includes a dictionary of templates, variables, and filenames.
-- One or more compressed blocks containing the actual log data, compressed using zlib with a custom dictionary.
+- A file header starting with the magic string "TCDZ"
+- A SQLite database (db/<archive_name>.meta.db) that stores templates, variables, and filenames. This is created inside the build folder or in the same place as your executable.
+- Multiple compressed blocks containing the actual log data, compressed using zlib with a custom dictionary.
 
 ## Prerequisites ✅
 
 - A C++ compiler with C++17 support (e.g., **g++** or **clang++**).
 - [zlib](https://zlib.net/) development library (ensure you link with `-lz`).
+- [SQLite3](https://www.sqlite.org/) development library.
 - *(Optional)* [CMake](https://cmake.org/) for generating the build configuration.
 
 ## Building the Project 🛠️
@@ -31,18 +34,19 @@ g++ -std=c++17 -O2 -lz main.cpp compressor.cpp decompressor.cpp searcher.cpp sql
 
 *Adjust the source file names if your project structure differs.*
 
-### Using CMake
+### Using CMake (Recommended)
 
 1. **Generate Build System (output goes to `./build`):**
 
-   ```bash
-   cmake -S . -B build
-   ```
-   OR
-  ```bash
-   cd build
-   cmake ..
-   ```
+    ```bash
+    cmake -S . -B build
+    ```
+    OR
+    ```bash
+    cd build
+    cmake ..
+    ```
+    if the previous command doesn't work for you.
 
 2. **Build the Project:**
 
@@ -70,7 +74,7 @@ Once compiled, the executable (named **logpress**) supports the following comman
 
 ### 1. Compressing Files
 
-Compress one or more log files into a single archive.
+Compress one or more log files into a single archive. <archive> can be a complete path with folders as well. We have used it as ./archives/<name_of_archive> during the project.
 
 ```bash
 ./logpress compress <archive> <file1> [file2 ...]
@@ -82,7 +86,7 @@ Compress one or more log files into a single archive.
 ./logpress compress archive.lgp log1.txt log2.txt
 ```
 
-> This reads `log1.txt` and `log2.txt`, compresses them using a template-based approach combined with zlib compression, and produces an archive called `archive.lgp`.
+> This reads log1.txt and log2.txt, compresses them using a template-based approach combined with zlib compression, and produces an archive called archive.lgp. A progress bar displays compression status and speed in real time.
 
 ### 2. Decompressing an Archive
 
@@ -114,18 +118,19 @@ Search for log lines matching a specific term within an archive without needing 
 ./logpress search archive.lgp "ERROR"
 ```
 
-> This command searches the archive for any log lines containing the term `"ERROR"` and prints the matching lines along with their corresponding filenames.
+> This command searches the archive using multiple threads for any log lines containing "ERROR" and prints the matching lines with highlighted search terms. Results maintain the original log order.
 
-## Internal Details 🔍
+**Advanced Search**
 
-- **Template-Based Compression:**  
-  Logpress deduplicates log entries by extracting and compressing common templates and numeric tokens.  
-- **Custom Zlib Dictionary:**  
-  A custom dictionary is generated from templates, filenames, and variables. This dictionary is used during compression (and decompression) to improve compression ratios.
-- **Metadata Storage:**  
-  A SQLite database is used to store metadata such as templates, variable values, and file names. This helps in reconstructing the original logs accurately.
-- **Regex-Based Classification:**  
-  The project includes several regex patterns for classifying numeric tokens (e.g., IP addresses and timestamps), which are used during the template creation process.
+The search function supports wildcard patterns with * and ?:
+
+```bash
+./logpress search archive.lgp "connection*failed"
+```
+
+```bash
+./logpress search archive.lgp "10.??.23.120"
+```
 
 ## Additional Notes 📝
 
@@ -140,6 +145,8 @@ Search for log lines matching a specific term within an archive without needing 
   - `main.cpp`
 - **Troubleshooting:**  
   - Ensure `zlib` is correctly installed and linked (use `-lz`).
+  - Xcode SDK Path Issues:
+  If you encounter SDK path errors after updating Xcode, try:
   - For sqlite issues, if you're using Homebrew on macOS, you may need to adjust your PATH or force-link sqlite:
     ```bash
     brew link sqlite --force
