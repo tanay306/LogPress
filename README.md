@@ -1,148 +1,200 @@
-# Logpress: Template-Based Log Compressor & Searcher 🚀
+# Logpress: Distributed Template-Based Log Compressor & Searcher 🚀
 
-**Logpress** is a command-line utility designed to efficiently compress, decompress, and search log files using a template-based approach. It leverages zlib (with a custom dictionary) to achieve high compression rates by deduplicating common log patterns.
+**Logpress** is a distributed system for efficient log compression, decompression, and search using a template-based mechanism and custom zlib dictionaries. It now includes microservices for chunk-based log transport and processing.
+
+---
 
 ## Features ✨
 
-- **Compress:** Bundle one or more log files into a single archive.
-- **Decompress:** Reconstruct original log files from a compressed archive.
-- **Search:** Quickly search through compressed logs for specific terms—without fully decompressing the archive.
+- **Compress:** Deduplicate and compress log files using templates.
+- **Decompress:** Reconstruct logs from compressed archives.
+- **Search:** Search compressed archives without full decompression.
+- **Distributed Design:** Leverages microservices (`chunk_sender`, `chunk_receiver`, `dbserver`) for scalable log ingestion and processing.
+- **Zlib with Custom Dictionary:** Improves compression ratio by reusing common log patterns.
+- **SQLite Metadata:** Keeps track of templates, tokens, and filenames for accurate log reconstruction.
 
-## Archive Format 🗃️
+---
 
-An archive created by Logpress consists of:
+## Project Structure 🗂️
 
-- A file header starting with the magic string `"TMZL"`.
-- A global metadata section (prefixed with `"TMPL"`) that includes a dictionary of templates, variables, and filenames.
-- One or more compressed blocks containing the actual log data, compressed using zlib with a custom dictionary.
+<pre>
+.
+├── chunk_reciever/         # Receives compressed log chunks (Go + Docker)
+│   ├── chunk_reciever.go
+│   └── Dockerfile
+├── chunk_sender/           # Sends log chunks to receiver
+│   ├── chunk_sender.go
+│   ├── Dockerfile
+│   ├── go.mod
+│   ├── HDFS2.log
+│   └── settings.json
+├── dbserver/               # Manages metadata and coordination (Go)
+│   ├── dbserver.go
+│   ├── Dockerfile
+│   ├── go.mod
+│   └── go.sum
+├── external/               # External headers
+│   └── json.hpp
+├── main.cpp
+├── compressor.cpp / .hpp
+├── decompressor.cpp / .hpp
+├── searcher.cpp / .hpp
+├── sqlite_helper.cpp / .hpp
+├── Makefile
+├── docker-compose.yml
+└── README.md
+</pre>
+
+---
 
 ## Prerequisites ✅
 
-- A C++ compiler with C++17 support (e.g., **g++** or **clang++**).
-- [zlib](https://zlib.net/) development library (ensure you link with `-lz`).
-- _(Optional)_ [CMake](https://cmake.org/) for generating the build configuration.
+- C++17 compiler (e.g., `g++`, `clang++`)
+- [zlib](https://zlib.net/) (`-lz`)
+- [SQLite3](https://sqlite.org/index.html) (`-lsqlite3`)
+- Go 1.22
+- Docker & Docker Compose
 
-## Building the Project 🛠️
+---
 
-### Using g++ Directly
+## Building the Core C++ Components 🛠️
 
-```bash
-g++ -g -o logpress main.cpp compressor.cpp decompressor.cpp searcher.cpp sqlite_helper.cpp -lz -lsqlite3
-```
-
-_Adjust the source file names if your project structure differs._
-
-### Using CMake
-
-1. **Generate Build System (output goes to `./build`):**
-
-   ```bash
-   cmake -S . -B build
-   ```
-
-2. **Build the Project:**
-
-   ```bash
-   cmake --build build
-   ```
-
-3. **Run the Executable:**
-
-   ```bash
-   ./build/logpress
-   ```
-
-## Usage 📖
-
-Once compiled, the executable (named **logpress**) supports the following commands:
-
-### 1. Compressing Files
-
-Compress one or more log files into a single archive.
+### Using Makefile
 
 ```bash
-./logpress compress <archive> <file1> [file2 ...]
+make
 ```
 
-**Example:**
+## Running the Distributed System 🧱
+
+### Start All Services
 
 ```bash
-./logpress compress archive.tmzl log1.txt log2.txt
+docker-compose up --build
 ```
 
-> This reads `log1.txt` and `log2.txt`, compresses them using a template-based approach combined with zlib compression, and produces an archive called `archive.tmzl`.
+This launches:
 
-### 2. Decompressing an Archive
+- chunk_sender: Reads and sends logs
 
-Reconstruct the original log files from an archive into a specified output folder.
+- chunk_reciever: Receives and compresses them
+
+- dbserver: Stores template and metadata info
+
+### Configuration
+
+Edit chunk_sender/settings.json to specify the links of the worker nodes.
+
+The existing settings.json works with the example docker-compose.yml.
+
+## Running the System with Docker 🐳
+
+Follow these steps to use the distributed Logpress system via Docker:
+
+---
+
+### 1. Start All Services
+
+From the root folder of the project, run:
 
 ```bash
-./logpress decompress <archive> <output_folder>
-```
-
-**Example:**
-
-```bash
-./logpress decompress archive.tmzl output_logs
-```
-
-> This extracts the compressed data from `archive.tmzl` and writes the reconstructed logs into the `output_logs` directory.
-
-### 3. Searching Within an Archive
-
-Search for log lines matching a specific term within an archive without needing to decompress all files.
-
-```bash
-./logpress search <archive> <search_term>
-```
-
-**Example:**
-
-```bash
-./logpress search archive.tmzl "ERROR"
-```
-
-> This command searches the archive for any log lines containing the term `"ERROR"` and prints the matching lines along with their corresponding filenames.
-
-## Internal Details 🔍
-
-- **Template-Based Compression:**  
-  Logpress deduplicates log entries by extracting and compressing common templates and numeric tokens.
-- **Custom Zlib Dictionary:**  
-  A custom dictionary is generated from templates, filenames, and variables. This dictionary is used during compression (and decompression) to improve compression ratios.
-- **Metadata Storage:**  
-  A SQLite database is used to store metadata such as templates, variable values, and file names. This helps in reconstructing the original logs accurately.
-- **Regex-Based Classification:**  
-  The project includes several regex patterns for classifying numeric tokens (e.g., IP addresses and timestamps), which are used during the template creation process.
-
-## Additional Notes 📝
-
-- **Emojis & Visual Clarity:**  
-  Emojis are used throughout the README to enhance readability and make the user guide more engaging.
-- **Project Structure:**  
-  Core source files include:
-  - `compressor.cpp`
-  - `decompressor.cpp`
-  - `searcher.cpp`
-  - `sqlite_helper.cpp`
-  - `main.cpp`
-- **Troubleshooting:**
-  - Ensure `zlib` is correctly installed and linked (use `-lz`).
-  - For sqlite issues, if you're using Homebrew on macOS, you may need to adjust your PATH or force-link sqlite:
-    ```bash
-    brew link sqlite --force
-    ```
-    or add:
-    ```bash
-    export PATH="/opt/homebrew/opt/sqlite/bin:$PATH"
-    ```
-    to your `~/.zshrc`.
-
-Enjoy using **Logpress** to effectively manage and search through your logs! 🎉
-
-For building use
-
 sudo docker-compose up --build
+```
 
-To run the compressor
-sudo docker run -it --rm --network logpress2_default --entrypoint /bin/sh chunk_sender
+This command will build and start the following services:
+
+- `chunk_sender`
+- `chunk_reciever`
+- `dbserver`
+
+---
+
+### 2. Connect to the `chunk_sender` Container
+
+Open another terminal and follow these steps:
+
+#### 2.1 Get the Docker Network Name
+
+List all Docker networks:
+
+```bash
+sudo docker network ls
+```
+
+Look for the network that was just created. It typically has a name based on your project folder.
+
+#### 2.2 Run `chunk_sender` Interactively
+
+Replace `<NETWORK>` with the actual network name found above:
+
+```bash
+sudo docker run -it --rm --network <NETWORK> --entrypoint /bin/sh chunk_sender
+```
+
+This opens an interactive shell inside the `chunk_sender` container.
+
+---
+
+### 3. Run Compression and Decompression Commands
+
+Inside the `chunk_sender` shell:
+
+#### 3.1 Compress a File
+
+To compress a file:
+
+```bash
+./chunk_sender compress <filename>
+```
+
+- This command reads the specified `<filename>`, compresses it using the template-based method, and sends it to the `chunk_reciever` service.
+
+#### 3.2 Decompress Files
+
+To decompress the previously compressed files:
+
+```bash
+./chunk_sender decompress
+```
+
+- The decompressed files will be saved inside the `./decompressed` folder within the `chunk_sender` container.
+
+---
+
+### Example Workflow
+
+1. Start all services:
+
+   ```bash
+   sudo docker-compose up --build
+   ```
+
+2. In a new terminal, get the Docker network name:
+
+   ```bash
+   sudo docker network ls
+   ```
+
+3. Connect to `chunk_sender`:
+
+   ```bash
+   sudo docker run -it --rm --network <NETWORK> --entrypoint /bin/sh chunk_sender
+   ```
+
+4. Inside the container shell:
+
+   - Compress a log file:
+
+     ```bash
+     ./chunk_sender compress ./HDFS2.log
+     ```
+
+   - Decompress logs:
+
+     ```bash
+     ./chunk_sender decompress
+     ```
+
+5. Decompressed logs will appear inside the `./decompressed` directory.
+
+---
