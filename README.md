@@ -1,6 +1,6 @@
 # This is a Test feature branch
 
-Owner of this branch - ndudhel [Pranav Jibhakate](https://github.com/pranavJibhakate)
+Owner of this branch - pjibhak [Pranav Jibhakate](https://github.com/pranavJibhakate)
 
 - This branch is an intermediary testing branch for Distributed compression algorithm. The final branch with the latest code can be found here. [distributed-with-docker](https://github.com/tanay306/LogPress/tree/distributed-with-docker)
 
