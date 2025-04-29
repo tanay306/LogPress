@@ -197,4 +197,6 @@ To decompress the previously compressed files:
 
 5. Decompressed logs will appear inside the `./decompressed` directory.
 
+6. Search log functionality is not implemented yet.
+
 ---
