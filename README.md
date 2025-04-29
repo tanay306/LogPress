@@ -1,3 +1,11 @@
+# This is a Test feature branch
+
+Owner of this branch - ndudhel [Pranav Jibhakate](https://github.com/pranavJibhakate)
+
+- This branch is an intermediary testing branch for Distributed compression algorithm. The final branch with the latest code can be found here. [distributed-with-docker](https://github.com/tanay306/LogPress/tree/distributed-with-docker)
+
+- We are keeping all the test branch to show contribution.
+
 # Template-Based Log Compressor & Searcher
 
 This project provides a command-line utility to compress log files using a template-based approach combined with zlib compression. It supports three main commands:
