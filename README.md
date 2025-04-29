@@ -13,6 +13,25 @@ Each branch has different approaches in them and hence we were not able to merge
 - Clustering approach (K-Means) - [clustering](https://github.com/tanay306/LogPress/tree/clustering)
 - Distributed approach - [distributed-with-docker](https://github.com/tanay306/LogPress/tree/distributed-with-docker)
 
+## Dependencies
+
+### macOS(Homebrew)
+```bash
+brew install go@1.22 gcc musl pkg-config sqlite curl zlib docker docker-compose
+brew link go@1.22 --overwrite --force
+```
+### Ubuntu
+```bash
+sudo apt-get update
+sudo apt-get install build-essential musl-tools pkg-config libsqlite3-dev zlib1g-dev libcurl4-openssl-dev docker-ce curl
+sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+wget https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
+sudo tar -C /usr/local -xvzf go1.22.0.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+```
+
+
 ## Dataset
 For all testing all the approaches you will need datasets. We have used datasets from [Loghub](https://github.com/logpai/loghub) and [Zenodo](https://zenodo.org/). The datasets we have used in Results/Evaluation are:
 | Dataset | Compressed/Download Size | Uncompressed/Original Size |
