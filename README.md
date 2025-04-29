@@ -1,75 +1,25 @@
-# Template-Based Log Compressor & Searcher
+# LogPress: Optimized Compression and Retrieval of Unstructured Logs.
 
-This project provides a command-line utility to compress log files using a template-based approach combined with zlib compression. It supports three main commands:
+## Team 6 (during presentation)
+The collaborators for this project and the work performed by them,
+- ndudhel [Neel Dudheliya](https://github.com/Neel317) worked on chunk-based approach
+- tgandhi [Tanay Gandhi](https://github.com/tanay306) worked on clustering and naive approach
+- pjibhak [Pranav Jibhakate](https://github.com/pranavJibhakate) worked on distributed approach.
 
-- **compress**: Compress one or more log files into a single archive.
-- **decompress**: Decompress an archive and reconstruct the original log files.
-- **search**: Search within the compressed archive for log lines matching a given search term.
+## Which branches have our latest code:
+Each branch has different approaches in them and hence we were not able to merge it into one. The code in these branches are used during our Demo and test results. Every branch has its own owner(collaborator), setup guide and details in the individual Readme.md
+- Naive approach - [dev](https://github.com/tanay306/LogPress/tree/dev)
+- Chunk based approach - [parallel-search](https://github.com/tanay306/LogPress/tree/parallel-search)
+- Clustering approach (K-Means) - [clustering](https://github.com/tanay306/LogPress/tree/clustering)
+- Distributed approach - [distributed-with-docker](https://github.com/tanay306/LogPress/tree/distributed-with-docker)
 
-The archive format starts with the magic `"TMZL"`, followed by the uncompressed size, compressed size, and the zlib-compressed data. The internal uncompressed data begins with `"TMPL"` and includes the dictionary of templates, log lines, and filenames.
-
-## Prerequisites
-
-- A C++ compiler with C++17 support (e.g., g++ or clang++).
-- [zlib](https://zlib.net/) development library installed (link with `-lz`).
-
-## Building the Project
-
-To compile the project, use a command similar to the following. Adjust the source file names as necessary if your project is split into multiple files (e.g., `compressor.cpp`, `decompressor.cpp`, `searcher.cpp`, and `main.cpp`):
-
-```bash
-g++ -std=c++17 -o logpress main.cpp compressor.cpp decompressor.cpp searcher.cpp -lz
-```
-Make sure that the include paths for zlib and the standard library are set correctly if they’re not in your default locations.
-
-## Usage
-
-Once compiled, the executable (here called `logpress`) supports the following commands:
-
-### Compressing Files
-
-To compress one or more log files into an archive:
-
-```bash
-./logpress compress <archive> <file1> [file2 ...]
-```
-
-Example:
-
-```bash
-./logpress compress compressed_archive.mylp fileA.log  
-```
-
-This command reads `fileA.log`, compresses them using the template-based approach combined with zlib, and creates an archive file named `compressed_archive.mylp`.
-
-### Decompressing an Archive
-
-To decompress an archive and reconstruct the original log files into an output folder:
-
-```bash
-./logpress decompress <archive> <output_folder>
-```
-
-Example:
-
-```bash
-./logpress decompress compressed_archive.mylp Decomp
-```
-
-This command extracts the compressed data from `compressed_archive.mylp` and writes the reconstructed log files to the directory `Decomp`.
-
-### Searching Within an Archive
-
-To search for a specific term in the archive without decompressing all files:
-
-```bash
-./logpress search <archive> <search_term>
-```
-
-Example:
-
-```bash
-./logpress search compressed_archive.mylp Verification  
-```
-
-This command searches the archive for any log lines containing the term "Verification" and prints out the matching lines along with the corresponding filename.
+## Dataset
+For all testing all the approaches you will need datasets. We have used datasets from [Loghub](https://github.com/logpai/loghub) and [Zenodo](https://zenodo.org/). The datasets we have used in Results/Evaluation are:
+| Dataset | Compressed/Download Size | Uncompressed/Original Size |
+|---------|--------------------------|-------------------|
+| [Mac](https://zenodo.org/records/8196385/files/Mac.tar.gz?download=1) | 1.5 MB | 16.9 MB |
+| [OpenSSH](https://zenodo.org/records/8196385/files/SSH.tar.gz?download=1) | 4.6 MB | 70.02 MB |
+| [Android_v1](https://zenodo.org/records/8196385/files/Android_v1.zip?download=1) | 24.9 MB | 183.37 MB |
+| [HDFS_v1](https://zenodo.org/records/8196385/files/HDFS_v1.zip?download=1) | 186.6 MB | 1.47 GB |
+| [Hive](https://zenodo.org/records/7094921) | 128.5 MB | 2.13 GB |
+| [Spark](https://zenodo.org/records/8196385/files/Spark.tar.gz?download=1) | 183.5 MB | 2.75 GB |
